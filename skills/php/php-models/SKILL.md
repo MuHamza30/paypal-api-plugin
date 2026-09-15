@@ -1,0 +1,151 @@
+---
+name: 'php-models'
+description: 'Construct and read the non-obvious model shapes of an APIMatic-generated PHP SDK — models are plain classes built through a companion `{Model}Builder`, enums are classes of `const` (never PHP 8.1 enums) whose fields are typed `string`/`int`, with a static `checkValue()` validator on the closed ones only, oneOf/anyOf unions have no container class and are unwrapped with `instanceof`, optional-and-nullable fields gain an `unset{Field}()` that distinguishes "absent" from "null", and unmodelled JSON is dropped unless the model supports additional properties. Use when building a request body or reading a response field of the PayPal Server SDK PHP SDK that is an enum, union, list/map, or date — anything that isn''t a plain string or number. Load it even after reading the field''s type in the source, since a `string` field may really be a validated enum and a docblock-only union type carries no runtime hint at all.'
+---
+
+# Working with models in an APIMatic PHP SDK
+
+Models are plain PHP classes in `src/Models/`: private fields, a constructor taking the **required**
+fields, `get{Field}()` / `set{Field}()` pairs, and `jsonSerialize()`. Beside each one, in
+`src/Models/Builders/`, is a `{Model}Builder`. This skill covers the shapes that trip integrations up;
+the plain scalar case is in **php-calling-endpoints**.
+
+> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Model}`,
+> `{Field}`, `{EnumClass}`) — replace it with the concrete identifier from the source.
+
+## Building: the builder's `init(...)` is the required-field list
+
+```php
+use PaypalServerSdkLib\Models\Builders\{Model}Builder;
+
+$model = {Model}Builder::init(/* required fields, positionally */)
+    ->{optionalField}($value)
+    ->build();
+```
+
+`build()` returns a **clone**, so a builder can be reused. `new {Model}(...)` plus `set{Field}(...)` is
+the equivalent longhand.
+
+## PHP name vs JSON name
+
+The setter's docblock carries `@maps {jsonName}` — that, not the method name, is the wire field. They
+diverge whenever the JSON name collides with a PHP keyword or an inherited member, so a JSON `code`
+field can surface as `getCodeProperty()` / `setCodeProperty()`. When you need the wire name, read the
+`@maps` annotation (or the model's `jsonSerialize()`), not the getter.
+
+## Enums — a class of constants, not a PHP `enum`
+
+These SDKs target PHP 7.2+, so an enum is generated as a **plain class** holding `public const` values.
+Whether that class *also* carries a static `checkValue()` validator, and whether any setter names it, is
+what varies:
+
+```php
+use PaypalServerSdkLib\Models\{EnumClass};
+
+$model = {Model}Builder::init({EnumClass}::{CONSTANT})->build();
+```
+
+This SDK was generated **with** `GenerateEnums`, so a **closed** enum — one whose spec definition does not
+accept values outside the listed set — gets `checkValue()` beside its constants, and an **open** enum gets
+the constants and nothing else. Closed vs open is decided **per enum**, from that enum's own definition,
+not once per SDK. One SDK routinely carries both kinds side by side — a large API can come out 85 open
+enums to one closed — so a `checkValue` hit on one class tells you nothing about the next. Check the class
+you are about to rely on, `grep -l checkValue src/Models/{EnumClass}.php`, rather than the directory.
+
+Three consequences:
+
+- **The field and parameter type is `string` (or `int`), not the enum class.** A signature saying
+  `string $status` is still an enum field. For a **closed** enum the setter's docblock names the class
+  (`@factory …{EnumClass}::checkValue`), and passing an unlisted string is accepted by PHP then rejected
+  at (de)serialization time with an `Exception` reading `"<value> is invalid for {EnumClass}."`. For an
+  **open** enum there is no annotation at all and an unlisted string goes out on the wire — `doc/models/`
+  and the operation's parameters table are then the only places the enum class is named.
+- **Constant names are derived from the values and are often mangled** — a trailing underscore to dodge
+  a PHP keyword, underscores inserted mid-word. Never guess the constant; open `src/Models/{EnumClass}.php`
+  and read it.
+- `{EnumClass}::checkValue($value)` is public **when it exists** — only closed enums get one, so check the class before calling it.
+
+`Environment` and `Server` in `src/` use the same class-of-constants shape but have **no** `checkValue()`.
+
+## oneOf / anyOf unions — no container class
+
+Unlike some APIMatic languages, PHP generates **no union container type**, no `from{Variant}()` factory
+and no visitor. A union field is:
+
+- typed only in the docblock — `@var Atom|Orbit` — and frequently has **no PHP type declaration at all**
+  on the getter/setter, so nothing checks it at assignment;
+- annotated on the setter with `@mapsBy anyOf(Atom,Orbit)` (or `oneOf(...)`, nested and combined with
+  `null` for nullable cases), which is the template the runtime validates against.
+
+**Write** by assigning the variant directly:
+
+```php
+$model = {Model}Builder::init(new Atom(/* … */))->build();
+```
+
+**Read** by type-testing yourself — this is the only mechanism:
+
+```php
+$value = $response->get{Field}();
+if ($value instanceof Atom) {
+    // …
+} elseif ($value instanceof Orbit) {
+    // …
+}
+```
+
+For scalar members use `is_string()` / `is_int()` / `is_float()` rather than `instanceof`.
+
+Validation happens when the value crosses the wire, not when you set it — so a wrong variant surfaces as
+a serialization exception on the call, with the `@mapsBy` template in the message. Read the setter's
+`@mapsBy` annotation (and `doc/models/containers/*.md`, which documents the cases) before debugging your
+own input.
+
+## Optional vs nullable — the `unset{Field}()` distinction
+
+A field that is **both optional and nullable** gets a third method:
+
+```php
+$model->set{Field}(null);    // send  "{field}": null
+$model->unset{Field}();      // omit "{field}" from the payload entirely
+$model->get{Field}();        // null in BOTH cases — the getter cannot tell them apart
+```
+
+The builder mirrors it with `->unset{Field}()`. If `unset{Field}()` exists on the model, that field
+distinguishes "absent" from "explicitly null" and you must pick deliberately. If it does not, the field
+is plain-optional: leaving it unset omits it, and there is no way to send an explicit `null`.
+
+## Collections, dates and numbers
+
+- **Lists and maps are both plain PHP `array`.** The docblock distinguishes them (`{Type}[]` vs
+  `array<string,{Type}>`); the type declaration says only `array`.
+- **Date and date-time fields are always `\DateTime`**, whatever the wire format (simple date, RFC 1123,
+  RFC 3339, Unix timestamp). Pass a `\DateTime`; the SDK converts. The `@factory` annotation on the
+  setter names the exact `DateTimeHelper` function, which is how you tell which wire format a field uses.
+- Numbers are `int` or `float` per the model; money and identifiers may be `string` — the declared type
+  is the source of truth.
+
+## Unknown / future fields
+
+A model keeps only the fields it declares. Unknown JSON is **dropped** on deserialization unless the
+model was generated with additional-properties support, which shows up as
+`addAdditionalProperty(string $name, $value)` and `findAdditionalProperty(string $name)` on the class:
+
+```php
+$extra = $model->findAdditionalProperty('someKey');   // returns FALSE when absent, not null
+if ($extra !== false) {
+    // …
+}
+
+$model = {Model}Builder::init(/* … */)
+    ->additionalProperty('someKey', $value)           // note: singular, unlike the model's addAdditionalProperty
+    ->build();
+```
+
+`findAdditionalProperty` returning `false` rather than `null` matters — a `?? ` or `is_null()` check
+silently misses it. If the class has neither method, regenerate the SDK or parse that response yourself.
+
+## Reference
+
+The enum class shape, the full `@mapsBy` template grammar, the `DateTimeHelper` function families and
+the additional-properties details are in [reference.md](reference.md).

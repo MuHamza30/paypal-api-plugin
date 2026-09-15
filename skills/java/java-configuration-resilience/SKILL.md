@@ -1,0 +1,199 @@
+---
+name: 'java-configuration-resilience'
+description: 'Tune an APIMatic-generated Java SDK client — everything transport-related goes through the `.httpClientConfig(builder -> ...)` lambda on the client Builder, where `timeout` is in **seconds** and per attempt; the generated `HttpClientConfiguration.Builder()` constructor sets only the retry status codes and HTTP methods — the `Retries` code-generation setting is never emitted into Java, so retries are off (`numberOfRetries` stays at the runtime default of `0`) until your own code sets it; plus proxy settings, injecting your own OkHttpClient, environment/base-URL selection, and request/response observation through `HttpCallback` or the generated logging configuration this build ships. Use whenever adjusting retries, timeouts, the environment, paging or logging on the PayPal Server SDK Java SDK — load it even after reading the builder in the source, since the option list does not reveal the units, the per-attempt semantics, or which defaults are actually set.'
+---
+
+# Configuration & resilience for an APIMatic Java SDK
+
+All configuration happens when you build the client (see **java-client-initialization**). Transport
+tuning is nested inside the `httpClientConfig` **lambda** — it is not on the client `Builder` directly:
+
+```java
+import {rootPackage}.{Api}Client;
+import {rootPackage}.Environment;
+
+{Api}Client client = new {Api}Client.Builder()
+        .environment(Environment.{MEMBER})
+        .httpClientConfig(configBuilder -> configBuilder
+                .timeout(30)                       // SECONDS
+                .numberOfRetries(3)
+                .backOffFactor(2)
+                .retryInterval(1)
+                .shouldRetryOnTimeout(true))
+        .build();
+```
+
+## The full `HttpClientConfiguration.Builder` surface
+
+| Method | Type | Meaning |
+| --- | --- | --- |
+| `timeout(long)` | seconds | per-attempt request timeout — the generated Javadoc says *"The timeout in seconds"* |
+| `numberOfRetries(int)` | count | retries **after** the first attempt |
+| `backOffFactor(int)` | multiplier | *"to use in calculation of wait time for next request in case of failure"* |
+| `retryInterval(long)` | | the other half of that calculation — the base wait |
+| `maximumRetryWaitTime(long)` | | *"the maximum wait time for overall retrying requests"* |
+| `shouldRetryOnTimeout(boolean)` | | whether a timed-out attempt is retried |
+| `httpStatusCodesToRetry(Set<Integer>)` | | which statuses are retryable |
+| `httpMethodsToRetry(Set<HttpMethod>)` | | which HTTP methods are retryable |
+| `httpClientInstance(okhttp3.OkHttpClient)` | | use your own OkHttp client |
+| `httpClientInstance(okhttp3.OkHttpClient, boolean overrideHttpClientConfigurations)` | | as above, and whether the SDK may override its timeout/retry settings |
+| `proxyConfig(HttpProxyConfiguration.Builder)` | | route through a proxy |
+
+Read the same list back off a built client with `client.getHttpClientConfig()`, which returns a
+`ReadonlyHttpClientConfiguration` with one accessor per option — `get...` for the values, but
+`shouldRetryOnTimeout()` and `shouldOverrideHttpClientConfigurations()` for the two booleans. Read
+`<root>/http/client/ReadonlyHttpClientConfiguration.java` for the exact list. It is the fastest way to
+confirm what a running client is actually using.
+
+## Retry defaults — retries are off, and the generated code cannot turn them on
+
+The generated `HttpClientConfiguration.Builder()` constructor sets **exactly two** things:
+`httpStatusCodesToRetry(...)` and `httpMethodsToRetry(...)` — from the `StatusCodesToRetry` and
+`RequestMethodsToRetry` code-generation settings, so they vary between SDKs.
+
+**Everything else — including `numberOfRetries` — is left at the runtime's own default**, which lives in
+the `io.apimatic:core` dependency, not in the generated code, and for `numberOfRetries` that default is
+`0`. That means:
+
+> **Retries are off.** Open `<root>/http/client/HttpClientConfiguration.java` and read the `Builder()`
+> constructor for the real retryable statuses and methods — those are the *only* two things it sets.
+> Retrying is **opt-in**: set `numberOfRetries(...)` explicitly if you want it.
+
+Notes that follow from the same shape:
+
+- Only the methods in `httpMethodsToRetry` are retried. That set typically covers idempotent verbs; if
+  `POST`/`PATCH`/`DELETE` are absent, those failures surface immediately. Add one only when the operation
+  is genuinely idempotent.
+- `timeout` bounds a **single attempt** (connect/read/write), not the whole call. As soon as
+  `numberOfRetries > 0` the runtime sets OkHttp's whole-call timeout to `maximumRetryWaitTime` *instead
+  of* `timeout`, so `maximumRetryWaitTime` — not `timeout` — is the real wall-clock ceiling for the
+  operation, retries and backoff included. Read its value off
+  `client.getHttpClientConfig().getMaximumRetryWaitTime()` rather than assuming a number, and raise it if
+  `(numberOfRetries + 1) × timeout` plus backoff could legitimately exceed it.
+- Retries happen inside the SDK, before any exception reaches your `catch` block.
+- **Retries are off until your own code turns them on.** The OkHttp adapter installs its retry
+  interceptor **only when `numberOfRetries` is above zero**, so at `0` a client makes exactly one attempt
+  per call and `numberOfRetries(0)` is a no-op. The Java generator never writes that value into the
+  generated code: the `Retries` code-generation setting is not emitted here at all, so a build with
+  `Retries: 3` produces the same two-statement `Builder()` constructor as a build with `Retries: 0`, and
+  `numberOfRetries` sits at the runtime's default of `0` either way. **The only thing that switches
+  retries on is `numberOfRetries(n)` in your own `httpClientConfig` lambda** — do not read the generated
+  constructor for a retry count, it can never carry one. Once you set it, every status and method listed
+  in that constructor is retried underneath your code. Raise it only where nothing above the SDK already
+  retries — a job scheduler, a message consumer, a failover wrapper, or your own loop. Retry layers
+  multiply rather than add: `numberOfRetries(3)` is **four** requests per attempt, so inside a
+  3-attempt job it is twelve requests against an API whose rate limit counts every one.
+
+## Base URL / environment
+
+There is **no free-form base-URL option**. The URL is derived from the selected `Environment` member and
+a `Server` member by a private resolver in `{Api}Client.java`; some SDKs additionally expose server
+parameters (a port, a tenant) as their own `Builder` methods.
+
+```java
+{Api}Client client = new {Api}Client.Builder()
+        .environment(Environment.{MEMBER})
+        .build();
+
+client.getBaseUri();                  // what it actually resolved to
+```
+
+Read the `Environment` enum for the real member names — they come from the spec's server list and a
+`PRODUCTION` member may not exist. To point the SDK somewhere no environment covers (a mock server, a
+recording proxy), inject an `OkHttpClient` with an interceptor — see **java-testing**.
+
+## Proxy
+
+```java
+.httpClientConfig(configBuilder -> configBuilder
+        .proxyConfig(new HttpProxyConfiguration.Builder("proxy.internal", 8080)
+                .auth(System.getenv("PROXY_USER"), System.getenv("PROXY_PASSWORD"))))
+```
+
+Address and port are constructor arguments; `auth(username, password)` is the only optional setter.
+
+## Bringing your own OkHttp client
+
+```java
+OkHttpClient shared = new OkHttpClient.Builder()
+        .connectionPool(new ConnectionPool(20, 5, TimeUnit.MINUTES))
+        .addInterceptor(myInterceptor)
+        .build();
+
+.httpClientConfig(configBuilder -> configBuilder
+        .httpClientInstance(shared, true))   // true = let the SDK apply its timeout/retry settings
+```
+
+The one-argument overload leaves `overrideHttpClientConfigurations` at its default of **true** — i.e. the
+SDK still rebuilds your client with its own timeouts and interceptors. To keep your client's own settings
+you must pass the two-argument form explicitly: `.httpClientInstance(shared, false)`. This is also the
+seam for anything OkHttp can do that the SDK does not expose: custom TLS, connection pooling, or an
+interceptor that logs or rewrites requests.
+
+Remember that `{Api}Client.shutdown()` is static and shuts down the SDK's OkHttp resources — if you own
+the client instance, manage its lifecycle yourself too.
+
+## Pagination — none in this SDK
+
+**This API declares no paginated operation**, so the SDK ships no `<root>/utilities/pagination/` package
+and no operation returns a `PagedIterable`/`PagedFlux`. Every list endpoint is a plain call: drive its own
+page/offset/cursor parameters yourself and stop when a page comes back shorter than you asked for.
+
+## Observing requests and responses
+
+**Always available: `HttpCallback`.** The client `Builder` accepts one, and it fires around every call:
+
+```java
+{Api}Client client = new {Api}Client.Builder()
+        .httpCallback(new HttpCallback() {
+            @Override
+            public void onBeforeRequest(Request request) {
+                log.debug("{} {}", request.getHttpMethod(), request.getQueryUrl());
+            }
+
+            @Override
+            public void onAfterResponse(Context context) {
+                log.debug("-> {}", context.getResponse().getStatusCode());
+            }
+        })
+        .build();
+```
+
+`HttpCallback` extends the runtime's `Callback`, so its parameters are the **runtime interfaces**
+`Request` and `Context` — **not** the SDK's own `HttpRequest` / `HttpResponse`. **No cast is needed**:
+`Request` itself declares `getHttpMethod()`, `getQueryUrl()`, `getHeaders()` and `getBody()`, and
+`context.getResponse()` declares `getStatusCode()`, `getHeaders()`, `getBody()`, `getRawBody()` and
+`getRawBodyString()`. Cast to the SDK's `HttpRequest`/`HttpResponse` only when you want its covariant
+return types — `Headers` instead of `HttpHeaders`, `HttpMethod` instead of `Method`. Take the imports for
+`Request` and `Context` from the `Callback` interface that the SDK's `HttpCallback` extends.
+
+**Also available here: built-in logging.** This SDK **was generated with logging enabled**, so it ships a
+`<root>/logging/configuration/` package and a `loggingConfig(...)` method on the client `Builder`:
+
+```java
+.loggingConfig(logBuilder -> logBuilder
+        .level(org.slf4j.event.Level.INFO)
+        .maskSensitiveHeaders(true)
+        .requestConfig(req -> req.body(true).headers(true).excludeHeaders("authorization"))
+        .responseConfig(res -> res.body(true).headers(false)))
+```
+
+There is also a no-argument `loggingConfig()` that turns on the default console logger. The default
+logger writes to stdout and needs nothing extra on the classpath. To route logs into your application's
+logging stack instead, pass your own SLF4J logger with `.logger(LoggerFactory.getLogger(...))` inside the
+`loggingConfig` lambda — that path, and only that path, needs an SLF4J binding. Read
+`<root>/logging/configuration/ReadonlyLoggingConfiguration.java` for the full option set.
+
+### Verify on the wire (first run of any new integration)
+
+Turn observation on for the first execution of any new call and inspect the output. A wrong environment,
+a leftover `{placeholder}`, or a mis-serialized path segment **compiles cleanly** and produces no in-band
+signal; the only symptom is a runtime `404`/`422`.
+
+Checklist for the first logged request:
+1. the **verb** matches the operation;
+2. the **path** has no literal `{placeholder}` left unsubstituted;
+3. each **path-param segment** is the value the API expects;
+4. the query params you set actually appear in the query string.
+
+Turn it back down once verified.
