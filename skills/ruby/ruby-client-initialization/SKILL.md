@@ -74,8 +74,20 @@ multiple servers generates several; endpoints pick their own). When the spec dec
 parameters, those become their own `Configuration` arguments and are substituted into the URL by
 `get_base_uri` — grep that method to see whether this SDK has any.
 
-`Environment.from_value` accepts a string or symbol and falls back to the default constant, which is how
-`ENVIRONMENT` from the environment gets resolved.
+`Environment.from_value` accepts a string or symbol, and is how `ENVIRONMENT` from the process
+environment gets resolved.
+
+> **Its fallback is the *first declared* environment, not the SDK's default one.** `from_value`'s
+> `default_value` parameter is generated as the first constant in the spec's environment list, so a
+> `nil` or unrecognised value resolves there — **and the two are the same constant only when the API
+> definition happens to list its default first.** An unrecognised value also only warns; it does not
+> raise. So a typo in `ENVIRONMENT`, or the variable being unset, silently selects the first
+> environment, which may be the live one. Read the `def self.from_value` line in
+> `lib/paypal_server_sdk/configuration.rb` to see which constant that actually is, and pass
+> `environment:` explicitly rather than relying on the fallback.
+>
+> The same generation rule applies to `Server.from_value`, whose fallback is the **first** environment's
+> first server — not the selected environment's.
 
 ## Configuration from environment variables
 

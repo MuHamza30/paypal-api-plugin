@@ -10,7 +10,7 @@ All configuration is passed at construction time in the single `Configuration` o
 not top level.
 
 ```typescript
-import { Client, Environment } from 'paypal-server-sdklib';
+import { Client, Environment } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   environment: Environment.{Name},
@@ -31,8 +31,21 @@ There is **no free-form `baseUrl` option**. The base URL is derived from the sel
 member (plus any server parameters such as `port`) by a private resolver in `src/client.ts`.
 
 Read the `Environment` enum in **`src/configuration.ts`** for the real member names before naming one —
-they vary per API, and a name like `Production` may not exist at all. To point the SDK at a mock or
-proxy that no `Environment` member covers, use the test seam in **typescript-testing**.
+they vary per API, and a name like `Production` may not exist at all.
+
+> **There is no supported way to send this client to a host no `Environment` member covers.** That is
+> the honest answer, and it is worth stating plainly because the need is common — a gateway, a sandbox
+> proxy, a recorded mock, a base URL supplied by an environment variable in production.
+>
+> **typescript-testing** describes a seam that *can* redirect traffic, but reaching it means supplying
+> your own transport adapter, i.e. owning the HTTP call the SDK was going to make. That is a reasonable
+> trade **in a test**, where you were replacing the transport anyway. In production code it means the
+> SDK is no longer making the request, and the retry, timeout and auth behaviour documented here stop
+> applying to it. Do not read the cross-reference as a supported production knob.
+>
+> If a deployment genuinely needs an arbitrary base URL, the options are: regenerate the SDK from a
+> spec whose `ServerConfiguration` declares that environment, or route to it below the SDK — a proxy,
+> or DNS — where the client's own behaviour is unaffected.
 
 ## Retries
 
@@ -122,7 +135,7 @@ This SDK **was generated with logging enabled**, so logging is built in: the `Co
 are exported from the package root. Configure it directly — there is no need to wrap the transport:
 
 ```typescript
-import { Client, LogLevel } from 'paypal-server-sdklib';
+import { Client, LogLevel } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   logging: {

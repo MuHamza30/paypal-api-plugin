@@ -152,20 +152,22 @@ result.is_success()    # / .is_error(), .errors
 
 ## Paginated operations
 
-**Only when this SDK ships pagination** — check for a `paypalserversdk/utilities/pagination/` package.
-Many SDKs have none; paging is then manual, through the operation's own `page` / `per_page`-style
-parameters, and the response is an ordinary list.
+**No operation in this API is paginated**, so the SDK ships no `paypalserversdk/utilities/pagination/`
+package and no operation returns a `PagedIterable`. There is nothing to iterate lazily and no `.pages()`
+to call — do not write against either.
 
-When it is present, an operation the API marks as paginated returns a `PagedIterable` instead of a plain
-list. Iterate it directly for items, or `.pages()` for whole pages — the SDK fetches each page lazily as
-you advance:
+That is a statement about **this API definition**, not about the provider. An API can page its results
+and still declare no pagination strategy, in which case the SDK models the paging parameters as ordinary
+operation parameters and hands you one page per call. So when you need more than one page:
 
-```python
-for item in client.{controller}.{operation}():
-    process(item)
-```
-
-See **python-configuration-resilience** for page-level access and the metadata each page type carries.
+- **Take the paging parameters off the operation's own signature** in
+  `paypalserversdk/controllers/` — they are keyword arguments like any other, and their names come
+  from the API definition rather than from a convention.
+- **Take the continuation value off the response model**, not from a counter you keep yourself. A page
+  number you increment cannot tell you when to stop; the response can, through whatever total, cursor or
+  next-link field the model declares.
+- **Stop on what the response says**, and bound the loop anyway — a loop that only ends when a page comes
+  back empty will run forever against an API that repeats its last page.
 
 ## Worked example — a list/GET call
 

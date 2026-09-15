@@ -18,7 +18,7 @@ The SDK exports a single `Client` class. You construct it with **one options obj
 `Partial<Configuration>` — every field is optional and missing fields fall back to `DEFAULT_CONFIGURATION`:
 
 ```ts
-import { Client, Environment } from 'paypal-server-sdklib';
+import { Client, Environment } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   environment: Environment.{Name},
@@ -116,7 +116,7 @@ Unlike some SDKs, the `Client` exposes **no controller accessor methods**. You c
 yourself, passing the client, then call operations on it (see **typescript-calling-endpoints**):
 
 ```ts
-import { {Controller} } from 'paypal-server-sdklib';
+import { {Controller} } from '@paypal/paypal-server-sdk';
 
 const controller = new {Controller}(client);
 const response = await controller.{operation}(/* params */);

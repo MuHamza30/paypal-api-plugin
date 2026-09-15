@@ -42,9 +42,17 @@ and (indirectly) `timeout`. `Configuration.create_http_client` hands all of them
 
 Notes:
 
-- **Only the methods in `retry_methods` are retried.** That list is generated, and typically covers
-  idempotent methods only — if `POST`/`PATCH`/`DELETE` are absent, their failures surface with no retry.
-  Add one only when the operation really is idempotent.
+- **Only the methods in `retry_methods` are retried**, for statuses and for errors raised after the
+  request reached the server. That list is generated and typically covers idempotent methods only, so
+  if `POST`/`PATCH`/`DELETE` are absent their failures surface with no retry. Add one only when the
+  operation really is idempotent.
+
+  One exception, and it is the safe kind: the transport is `urllib3`'s `Retry`, which classes a
+  **connect-phase** failure separately and retries it without checking the method list — on the
+  reasoning that a connection that was never established cannot have delivered the request. So a
+  connect timeout on a `POST` may be retried even with `POST` absent; a *read* timeout on the same
+  `POST` will not be, which is the case that could duplicate a write. Worth knowing before you read a
+  retry count in a log and conclude the list is not being honoured.
 - **Only the statuses in `retry_statuses` are retried**; everything else raises immediately.
 - **`timeout` is handed to the transport per request** (`RequestsClient(timeout=self.timeout, ...)` in
   `Configuration.create_http_client`) — it is not a deadline over the whole call including retries. If
@@ -94,40 +102,13 @@ have the SDK's timeout and retry settings applied to that client rather than lef
 
 ## Pagination
 
-**Only when this SDK ships pagination** — check for a `paypalserversdk/utilities/pagination/` package.
-Many SDKs have none, and paging is then manual through the operation's own parameters.
+**No operation in this API is paginated.** The SDK ships no `paypalserversdk/utilities/pagination/`
+package, so there is no `PagedIterable`, no `.pages()`, and no paged-response type to narrow with
+`isinstance`. Nothing here needs configuring.
 
-An operation the API marks as paginated returns a `PagedIterable`
-(`paypalserversdk/utilities/pagination/paged_iterable.py`). It fetches pages lazily as you consume it,
-and gives you two views:
-
-```python
-result = client.{controller}.{operation}()
-
-# 1. every item across every page
-for item in result:
-    process(item)
-
-# 2. page by page, when you need the paging metadata
-for page in result.pages():
-    print(page.body)        # the deserialized page model
-    for item in page.items():
-        process(item)
-```
-
-Each page is one of the paged-response types in
-`paypalserversdk/utilities/pagination/paged_response.py` — `OffsetPagedResponse`,
-`NumberPagedResponse`, `CursorPagedResponse` or `LinkPagedResponse` — carrying the strategy's own
-metadata (`offset`, `page_number`, `next_cursor`, `next_link` respectively). `isinstance` tells them
-apart; `doc/paged-iterable.md` shows the full pattern.
-
-The paging arguments you pass seed the **first** page; the SDK advances them and stops when the API
-signals the end. A failed page fetch raises `ApiException` mid-iteration (see
-**python-error-handling**).
-
-> Not every list endpoint is paginated. An operation whose `doc/controllers/` page does not say it
-> returns a `PagedIterable` is a plain list call — drive its own paging parameters yourself and stop
-> when a page comes back short.
+If you need more than one page from a list endpoint, you drive it yourself: the paging arguments are
+ordinary parameters on the operation, and the stopping condition comes from the response model rather
+than from the SDK. Bound the loop explicitly — nothing in the SDK will stop it for you.
 
 ## Logging
 

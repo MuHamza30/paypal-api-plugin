@@ -99,6 +99,27 @@ fall back to `e.response.text`.
 - **Transport failures** — connection refused, DNS failure, TLS error, read timeout — come out of the
   underlying `requests` transport, not as `ApiException`. Catch them separately (or let them propagate)
   rather than assuming an `except ApiException` covers a network outage.
+
+  > **You cannot tell them apart by exception type, and for a write that distinction is the whole
+  > question.** The transport mounts a `urllib3` retry adapter on every session — unconditionally, even
+  > when the retry count is `0` — so an exhausted retry wraps the real cause in `MaxRetryError`, and
+  > `requests` then surfaces that as a plain **`ConnectionError`**. A read timeout and a refused
+  > connection arrive as the *same class*.
+  >
+  > That matters because they mean opposite things for a non-idempotent call: a refused connection never
+  > delivered the request, while a read timeout means the server may have processed it and you simply did
+  > not hear back. Treating the second as the first is how a retry becomes a duplicate.
+  >
+  > To distinguish them, walk the cause chain rather than matching the class — look for
+  > `urllib3.exceptions.ReadTimeoutError` (outcome unknown) versus `ConnectTimeoutError` /
+  > `NewConnectionError` (never sent):
+  >
+  > ```python
+  > def _root_cause(err):
+  >     while err is not None:
+  >         yield err
+  >         err = err.__cause__ or err.__context__
+  > ```
 - **OAuth token acquisition** — an *explicit* `fetch_token()` raises the SDK's OAuth provider exception
   (generated per SDK — grep `exceptions/`, the casing varies). The **automatic** pre-call fetch swallows
   it and raises `AuthValidationException` from `apimatic_core` instead, which is **not** an

@@ -182,6 +182,14 @@ exception is the only signal there is.
 - **Transport failures** never reach the error map and are not wrapped: connection refused, DNS
   failure and TLS errors surface from `System.Net.Http` as `HttpRequestException`, a timeout or a
   cancelled `CancellationToken` as a cancellation exception.
+- **A breach of `MaximumRetryWaitTime` is `Polly.Timeout.TimeoutRejectedException`, and it is not a
+  cancellation.** That setting sizes a timeout policy wrapping the whole call, so when it fires the
+  exception comes from Polly, not from `System.Threading`. It does **not** derive from
+  `OperationCanceledException`, so a catch ladder written for cancellation misses it and the call
+  escapes as an unhandled exception — a stalled provider then surfaces to your caller as a bare `500`
+  rather than the timeout you meant to return. Catch it by name, or catch broadly at the boundary. The
+  type comes from the runtime's dependency rather than the SDK, so it appears in no generated file:
+  see **csharp-configuration-resilience** for where it is configured.
 - **A credential the operation's auth group requires is missing.** For a scheme that registers a wire
   parameter, the group is validated as the request is built and the failure is `AuthValidationException`
   (an `ArgumentNullException`) listing the credentials it wanted — that one **escapes**

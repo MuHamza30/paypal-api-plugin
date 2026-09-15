@@ -87,6 +87,18 @@ string alt = client.GetBaseUri(Server.{SERVER});    // a named alias from Server
 `Environment(...)` and the spec's configuration variables. See **csharp-configuration-resilience** for
 what that rules out and how to reach a host no `Environment` member covers.
 
+> **Omit `.Environment(...)` and you still get one.** The `Builder` initialises the field to a default
+> chosen by the API definition, not by you, and **that default may be the live environment** — nothing
+> warns, logs or fails. Read the initialiser on the `Builder`'s `environment` field in
+> `PaypalServerSdkClient.cs` to see which member your SDK actually starts from, and set it explicitly
+> whichever it turns out to be.
+>
+> **A second, separate trap:** `Environment` is emitted with no explicit values, so its members number
+> from zero in declaration order. `default(Environment)`, `(Environment)0`, a zero-initialised field and
+> a failed `Enum.TryParse` therefore all mean **the first member in `Environment.cs`** — which is not
+> necessarily the `Builder`'s default. The two coincide only when the API definition happens to list its
+> default first. Never let an environment reach the builder as an unchecked `default`.
+
 ## Configuration from a bound `IConfiguration` section
 
 ```csharp

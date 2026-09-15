@@ -35,7 +35,7 @@ Those values are **a policy you are choosing**, not this SDK's defaults. There i
 | `NumberOfRetries(int)` | count | times a request is retried |
 | `BackoffFactor(int)` | multiplier | exponential backoff between retry calls |
 | `RetryInterval(double)` | `double` | interval between the endpoint calls |
-| `MaximumRetryWaitTime(TimeSpan)` | `TimeSpan` | cap on retry waiting |
+| `MaximumRetryWaitTime(TimeSpan)` | `TimeSpan` | **not only a cap on retry waiting** — it sizes a timeout policy that wraps the *whole* call, retries included, and breaching it throws `Polly.Timeout.TimeoutRejectedException`. That is **not** an `OperationCanceledException`, so a `catch` written for cancellation does not see it (see **csharp-error-handling**). Left unset it is infinite |
 | `StatusCodesToRetry(IList<int>)` | statuses | which statuses invoke a retry |
 | `RequestMethodsToRetry(IList<HttpMethod>)` | `System.Net.Http.HttpMethod` | which verbs invoke a retry |
 | `HttpClientInstance(HttpClient, bool overrideHttpClientConfiguration = true)` | | use your own client — the getter is **never `null`**, since the runtime materialises one when you inject nothing, so assert identity (`NotSame`) rather than nullness when checking whether yours survived |
@@ -57,10 +57,29 @@ effective default comes from the `APIMatic.Core` package, whose version the `.cs
 > not usable for this. That is the only authoritative answer for this build.
 
 - **Nothing is retried out of the box.** The effective default is `NumberOfRetries = 0`, so no verb is
-  retried — `GET` and `PUT` included — until you raise the count yourself. Once you do, only the verbs in
-  `RequestMethodsToRetry` are eligible, and that list defaults to **`GET, PUT`** on every build checked, so
-  `POST`/`PATCH`/`DELETE` still surface immediately until you add them — and add one only when the operation
-  is genuinely idempotent. **Check what your SDK's surface actually is before tuning retries at all** —
+  retried — `GET` and `PUT` included — until you raise the count yourself.
+
+> ### ⚠ `RequestMethodsToRetry` does not protect a `POST`
+>
+> **The verb whitelist gates only the *response*-triggered arm of the retry policy. A call that fails by
+> throwing is retried whatever its verb.** The runtime builds one policy as
+> `Policy.HandleResult(ShouldRetry).Or<TaskCanceledException>().Or<HttpRequestException>()`, and only
+> `ShouldRetry` consults `RequestMethodsToRetry`. The two `.Or<...>` arms do not.
+>
+> So with `NumberOfRetries(2)` and a whitelist of `GET` alone, a create `POST` that times out or drops
+> its connection **is sent again** — which is the duplicate-write hazard, arriving through the one door
+> the whitelist looks like it closes. Observed: a single create call produced two `POST`s at the
+> provider, and only the provider's idempotency key stopped it becoming two records.
+>
+> A raised `NumberOfRetries` is therefore a decision about **every** verb the client sends, not just the
+> whitelisted ones. If some operations must never be re-sent, the whitelist will not express that —
+> separate the clients, or keep `NumberOfRetries(0)` on the one that performs writes and raise it only
+> on the read path.
+
+- Once you do raise it, the verbs in `RequestMethodsToRetry` are what the **status-code** arm will retry;
+  that list defaults to **`GET, PUT`** on every build checked, so a `POST` is not retried *on a 5xx*
+  until you add it — subject to the exception arm above, which ignores the list entirely.
+  **Check what your SDK's surface actually is before tuning retries at all** —
   `grep -rhoE 'Setup\(HttpMethod\.[A-Za-z]+|Setup\(new HttpMethod\("[A-Z]+"' Controllers/ | sort | uniq -c`
   (the folder name is a generator setting, so take it from the token rather than assuming) — and match
   **both** forms, because verbs with no `HttpMethod` static (`PATCH` among them) are emitted as

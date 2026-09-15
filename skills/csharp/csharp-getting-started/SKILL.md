@@ -35,8 +35,8 @@ each step below load the companion *and* confirm names against the source.
 | API | `PayPal Server SDK` |
 | Generator | APIMATIC v3.0 — every file's header ends `by APIMATIC v3.0`, sometimes with a `for <brand>` in the middle that comes from the build's separate `BrandLabel` setting rather than the API name, so **grep `APIMATIC v3.0`, not the whole sentence** |
 | Runtime dependencies | `APIMatic.Core`, `Microsoft.CSharp`, `Microsoft.Extensions.Configuration.Binder`; a build adds more — **read the `PackageReference` rows in the `.csproj`**. Newtonsoft.Json arrives **transitively** |
-| Package id | `PaypalServerSdkStandard` (version `2.29.0.0`) — the `<AssemblyName>`, and the only string `dotnet add package` accepts |
-| Install | `dotnet add reference path/to/PaypalServerSdk.Standard/PaypalServerSdk.Standard.csproj` |
+| Package id | `PayPalServerSDK` (version `2.0.0`) — the `<AssemblyName>`, and the only string `dotnet add package` accepts |
+| Install | `dotnet add package PayPalServerSDK` |
 | Root namespace | `PaypalServerSdk.Standard` — **also the project name, folder and `.csproj` file name**, and what every `using` references |
 | Target framework | `netstandard2.0`; `<LangVersion>` varies per build — read it off the `.csproj`. Reference it from any modern TFM (`net8.0`+). The library ships **without** nullable-reference annotations, so `<Nullable>enable</Nullable>` — the `dotnet new console` default — yields no warnings from SDK signatures. Whether it yields `CS0659` depends on two independent settings, and the SDK's `<NoWarn>` lists `1591;1570;649` but **not** `659`. `Equals` is emitted on models unless the build set `CSharpSkipEqualityMethods`; `GetHashCode` is emitted only on an `EnableImmutableModels` build. So: `Equals` without `GetHashCode` → one `CS0659` per model type, hundreds on a large SDK; both, or neither → silent. Two greps tell you which of the three you have — `-l` and `-c` cannot be combined, so run them separately: `grep -rl 'override bool Equals' Models/ | wc -l` and `grep -rl 'override int GetHashCode' Models/ | wc -l`. Either way they are the SDK's warnings, not yours |
 | Client | one `public sealed class PaypalServerSdkClient`, built with `new PaypalServerSdkClient.Builder()…Build()` — the constructor is **private** |
@@ -130,6 +130,15 @@ the concrete identifier from the source.
   plus `ApiResponse.cs` — emitted only because this SDK sets `ReturnCompleteHttpResponse`.
 - `Utilities/` — `ApiHelper` and `CompatibilityFactory` always; the date converters, `Pagination/` and
   `AdditionalPropertiesExtensions` only when the API needs them.
+
+  > **`ApiHelper` is an empty subclass — do not read its file to decide what it offers.** It is
+  > generated as `public class ApiHelper : CoreHelper { }`, a dozen lines with no members of its own.
+  > Every method you call on it is **inherited from `CoreHelper` in the `APIMatic.Core` runtime
+  > package**, and C# resolves an inherited public static member through the derived type name, so
+  > `ApiHelper.{Member}(...)` compiles even though `ApiHelper.cs` mentions nothing. Grepping the
+  > generated file and finding it bare is not evidence the member is missing — that conclusion has
+  > already cost a reader a hand-rolled replacement for a method that was there all along. Resolve the
+  > base type and look there, or let the compiler answer.
 - `Logging/LogBuilder.cs` — present, because this SDK was generated with `EnableLogging`.
 
 - `Examples/` — **only in some builds**: per-operation snippets in namespace `TestConsoleProject`,
@@ -151,13 +160,13 @@ the concrete identifier from the source.
 
 ## Install
 
-This SDK is published out of `https://github.com/MuHamza30/paypal-server-sdk-csharp`, branch `main` — take that branch explicitly rather than the repository default, which is not necessarily where this SDK is released from. Which registry that pipeline pushes to is a property of the pipeline rather than of the SDK, so confirm the feed before assuming the public one.
+This SDK is published out of `https://github.com/paypal/PayPal-Dotnet-Server-SDK`, branch `main` — take that branch explicitly rather than the repository default, which is not necessarily where this SDK is released from. Which registry that pipeline pushes to is a property of the pipeline rather than of the SDK. Try the install command below as-is first: if it resolves, the package is on the public registry and there is nothing further to configure. Only if it 404s do you need the feed — take it from the repository's publish workflow, or from whoever owns the pipeline, and configure that registry before retrying.
 
 ```bash
-dotnet add reference path/to/PaypalServerSdk.Standard/PaypalServerSdk.Standard.csproj
+dotnet add package PayPalServerSDK
 ```
 
-If the SDK was published, that is a `dotnet add package` line resolving `PaypalServerSdkStandard` from your feeds.
+If the SDK was published, that is a `dotnet add package` line resolving `PayPalServerSDK` from your feeds.
 If it was not, the SDK is a **source project, not a registry package** — reference the class library's
 `.csproj` instead, from under `vendor/` in the consuming project, committed but never edited:
 
@@ -189,7 +198,7 @@ surface without saying so.
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="PaypalServerSdkStandard" Version="2.29.0.0" />
+  <PackageReference Include="PayPalServerSDK" Version="2.0.0" />
 </ItemGroup>
 ```
 
@@ -197,7 +206,7 @@ Confirm what restored rather than assuming, and move to a regenerated build deli
 
 ```bash
 dotnet list package                                          # what the project resolved
-dotnet add package PaypalServerSdkStandard --version 2.29.0.0
+dotnet add package PayPalServerSDK --version 2.0.0
 ```
 
 An SDK on a **private feed** restores only once that feed is registered and authenticated. Register it
@@ -216,10 +225,10 @@ A package you build yourself is the same story with a directory standing in for 
 in the SDK directory writes a `.nupkg`, and `dotnet nuget add source ./local-feed` makes it restorable
 by id — the route to take when the consuming project cannot carry a project reference.
 
-### `PaypalServerSdkStandard` and `PaypalServerSdk.Standard` are not interchangeable
+### `PayPalServerSDK` and `PaypalServerSdk.Standard` are not interchangeable
 
-`PaypalServerSdkStandard` belongs in `dotnet add package` and `<PackageReference Include="…">` and **nowhere
-else**. `using PaypalServerSdkStandard;` does not compile.
+`PayPalServerSDK` belongs in `dotnet add package` and `<PackageReference Include="…">` and **nowhere
+else**. `using PayPalServerSDK;` does not compile.
 
 ## SDK source — read it in place
 
@@ -229,16 +238,26 @@ model classes, enum members and exception types, and the **only reliable way** i
 Clone it and read the clone — it is the source this pack documents:
 
 ```bash
-git clone --depth 1 --branch main https://github.com/MuHamza30/paypal-server-sdk-csharp
+git clone --depth 1 --branch main https://github.com/paypal/PayPal-Dotnet-Server-SDK
 ```
 
-Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
+**The clone is a branch; your install is pinned.** Check out the tag matching `2.0.0`, the version installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
 
 An existing copy, if you already have one, is the **unpacked SDK directory** you were given (the one
 containing the `.sln`, `README.md`, `doc/` and the `PaypalServerSdk.Standard/` project folder), or the copy
 inside your repository if it was wired in with a `<ProjectReference>`.
 
-Treat it as a read-only reference and grep it locally.
+> **A NuGet install is not that copy.** A `PackageReference` restores a package containing the
+> compiled assembly and an XML documentation file — **no `.cs` files and no `doc/` directory.** The
+> layout below describes the SDK's *source tree*, which is a different artifact from the restored
+> package; the paragraph above this one says where that tree comes from for this SDK.
+>
+> Until you have it, the only reference that ships with the package is `PayPalServerSDK.xml`, beside the
+> assembly in the package folder. That is the IntelliSense file: greppable for member names and summary
+> text, carrying no usage examples — so it answers "does this member exist, and what is it called" and
+> nothing else.
+
+Treat the source tree as a read-only reference and grep it locally.
 
 Layout — grep here first (paths are inside the `PaypalServerSdk.Standard/` project folder, except the last):
 
@@ -253,9 +272,11 @@ Layout — grep here first (paths are inside the `PaypalServerSdk.Standard/` pro
   **this is where field names live**. `Exceptions/` — `ApiException` and the typed subclasses.
 - `Http/Client/HttpClientConfiguration.cs` — the timeout / retry / proxy / custom-`HttpClient` surface.
 - `README.md` and `doc/` at the archive root — a generated, human-readable index: `doc/client.md`,
-  `doc/controllers/*.md`, `doc/models/*.md`, `doc/auth/*.md`. **Grep `doc/` first** — it is the fastest
-  way to find an operation, its parameters, and a copy-pasteable usage snippet, then open the `.cs`
-  file for the exact signature.
+  `doc/controllers/*.md`, `doc/models/*.md`, `doc/auth/*.md`. **Present only in the source tree**, not
+  in the installed package. When you have it, grep `doc/` first — it is the fastest way to find an
+  operation, its parameters, and a copy-pasteable usage snippet, then open the `.cs` file for the exact
+  signature. When you do not, `Controllers/*.cs` is the equivalent starting point, and the
+  operation's own signature replaces the snippet.
 
 > **The generated docs are a finding aid, not a contract — the `.cs` file wins.** `doc/` can advertise
 > methods that do not exist and signatures that differ from the code (the companion skills name the

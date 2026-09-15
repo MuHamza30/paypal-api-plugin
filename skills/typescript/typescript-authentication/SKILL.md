@@ -31,7 +31,7 @@ auth adapters. See [reference.md](reference.md).
 ## Basic auth
 
 ```typescript
-import { Client } from 'paypal-server-sdklib';
+import { Client } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   {basicAuthProperty}: {
@@ -74,7 +74,7 @@ key(s) (`TS2741` when exactly one is missing, `TS2739` when several are).
 Every OAuth credential field is **`oAuth`-prefixed** — capital A:
 
 ```typescript
-import { Client } from 'paypal-server-sdklib';
+import { Client } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   {oAuthProperty}: {
@@ -114,9 +114,43 @@ const client = new Client({
 });
 ```
 
-`oAuthTokenProvider` is invoked whenever the cached token is missing or expired. To re-credential an
-**already-constructed** client, use `client.withConfiguration({...})` — it returns a **new** client
-rather than mutating the existing one:
+`oAuthTokenProvider` is invoked whenever the cached token is missing or expired.
+
+> ### ⚠ Your `oAuthTokenProvider` must never reject
+>
+> **A single rejection disables the client for the rest of the process.** The adapter keeps the token as
+> a *promise* shared by every call on that client, and each call reads it before replacing it:
+>
+> ```ts
+> let token = await lastOAuthToken;                 // ← throws here on every later call
+> lastOAuthToken = refreshOAuthToken(token, ...);   // ← never reached
+> ```
+>
+> When your provider rejects, that rejected promise is what gets stored. The next call throws on the
+> **first** line and so never reaches the line that would replace it, and neither does the call after
+> that. One transient failure — the database holding your token being briefly unreachable — is
+> permanent for the lifetime of that client object, and no retry setting touches it because the failure
+> happens before any request is built.
+>
+> So make the provider **resolve** in every path. Where you cannot produce a token, return an expired
+> one rather than throwing: the adapter will treat it as needing refresh and call you again next time,
+> which is the recoverable behaviour you want.
+>
+> ```ts
+> oAuthTokenProvider: async (lastOAuthToken, authManager) => {
+>   try {
+>     return (await loadTokenFromDatabase()) ?? (await authManager.fetchToken());
+>   } catch (err) {
+>     recordTheFailureSomewhere(err);
+>     return { ...(lastOAuthToken ?? {}), expiry: 0n } as typeof lastOAuthToken;  // expired ⇒ retried next call
+>   }
+> },
+> ```
+>
+> The sample above this note takes the short form for readability. In anything long-lived, wrap it.
+
+To re-credential an **already-constructed** client, use `client.withConfiguration({...})` — it returns a
+**new** client rather than mutating the existing one:
 
 ```typescript
 client = client.withConfiguration({

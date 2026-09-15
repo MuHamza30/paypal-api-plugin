@@ -67,6 +67,18 @@ template variable) as their own `Configuration` arguments that feed the URL temp
 shows exactly which. To point the SDK at a mock or proxy that no `Environment` member covers, see
 **python-configuration-resilience** and **python-testing**.
 
+> **Pass no `environment` and you still get one.** It is a defaulted keyword argument, and the default
+> was chosen by the API definition rather than by you — **it may be the live environment**, and nothing
+> warns or fails. Read the `environment=` default on `Configuration.__init__` in
+> `paypalserversdk/configuration.py` to see which member your SDK starts from.
+>
+> **Two separate traps beyond that.** The enum's members are numbered in declaration order
+> (`= 0`, `= 1`, …), and `Environment.from_value` accepts an **int** as well as a string — so passing
+> `0`, or an id that arrived as a number, selects the **first member listed**, which need not be the
+> constructor's default. And `from_value` returns its `default` argument for anything it does not
+> recognise rather than raising, so a typo resolves to `None` and travels on silently. Convert through
+> `from_value` only when you then check the result.
+
 ## Configuration from environment variables / a .env file
 
 Both the client and `Configuration` expose a `from_environment` classmethod. It calls

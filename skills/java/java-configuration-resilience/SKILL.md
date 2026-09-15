@@ -61,9 +61,31 @@ the `io.apimatic:core` dependency, not in the generated code, and for `numberOfR
 
 Notes that follow from the same shape:
 
-- Only the methods in `httpMethodsToRetry` are retried. That set typically covers idempotent verbs; if
-  `POST`/`PATCH`/`DELETE` are absent, those failures surface immediately. Add one only when the operation
-  is genuinely idempotent.
+- Only the methods in `httpMethodsToRetry` are retried **when the retry decision is the interceptor's
+  to make** — that is, for a status code, or for the interceptor's own timeout. That set typically
+  covers idempotent verbs; add one only when the operation is genuinely idempotent.
+
+> ### ⚠ `httpMethodsToRetry` does not stop a `POST` being re-sent
+>
+> Two paths re-send a request **without consulting the verb list at all**, so a write can be repeated
+> even when `POST` is absent from it.
+>
+> **1. The adapter re-sends on any `SocketException`, unbounded.** Its retry interceptor wraps the call
+> as `try { return chain.proceed(request); } catch (SocketException e) { return getResponse(chain,
+> request, response, false); }` — a **recursive** re-send that consults neither `httpMethodsToRetry` nor
+> `numberOfRetries`. `SocketException` covers connection reset, broken pipe and "software caused
+> connection abort", all of which happen **after** the request bytes are on the wire, so the server may
+> well have processed the write. This path is installed only when `numberOfRetries > 0` — so it is
+> dormant at the default and switches on, unbounded, the moment anyone enables retries at all.
+>
+> **2. OkHttp's own connection recovery is always on.** The adapter builds its client with
+> `retryOnConnectionFailure(true)`, and OkHttp's recovery checks the failure kind and the remaining
+> routes — never the HTTP verb.
+>
+> So on this stack, `numberOfRetries` is not a bound on writes and `httpMethodsToRetry` is not a filter
+> on them. If an operation must never be sent twice, neither setting expresses that: give writes their
+> own client with retries off, supply your own `OkHttpClient` with `retryOnConnectionFailure(false)`, or
+> make the operation idempotent at the provider with a caller-supplied key.
 - `timeout` bounds a **single attempt** (connect/read/write), not the whole call. As soon as
   `numberOfRetries > 0` the runtime sets OkHttp's whole-call timeout to `maximumRetryWaitTime` *instead
   of* `timeout`, so `maximumRetryWaitTime` — not `timeout` — is the real wall-clock ceiling for the
