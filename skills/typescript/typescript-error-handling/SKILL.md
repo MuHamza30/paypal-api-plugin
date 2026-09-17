@@ -1,14 +1,12 @@
 ---
 name: 'typescript-error-handling'
-description: 'Handle errors from an APIMatic-generated TypeScript/Node.js SDK — calls always throw on non-2xx, either base `ApiError` or a typed subclass named after the **error response model** (not the operation), carrying `statusCode`, `headers` and the raw `body` — plus a parsed `result` that the runtime fills on the typed subclasses only. Use the moment you write a try/catch around a call, handle a non-2xx/error response, or read a status code or rate-limit headers on the PayPal Server SDK TypeScript SDK — load it even after reading the thrown type in the source, since the type alone won''t warn you that one operation maps several status codes to several different error classes, that the payload lives on `err.result` rather than on accessors of the subclass, or that a bare `ApiError` leaves `result` undefined so you must read `body`.'
+description: 'Handle errors from the PayPal Server SDK TypeScript SDK. Load before your first try/catch around a call, or when building an error-translation layer. The thrown type won''t tell you `result` is undefined on a bare `ApiError`, that an error payload keeps the wire''s own field names, or that the `doc/` Errors table can name classes nothing registers.'
 ---
 
 # Error handling for an APIMatic TypeScript SDK
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{operation}`, `{apiGroup}`) — replace it with the concrete identifier from the source.
-
 Endpoint methods **throw on non-success responses** — there is no non-throwing variant, and this is not a
-generator option: the shared `@apimatic/core` request builder installs a response validator that throws for
+build option: the shared `@apimatic/core` request builder installs a response validator that throws for
 any status outside `200`–`299`, on every operation of every build.
 
 The thrown type is always `ApiError`, but it comes in **two shapes**, depending on the status code the
@@ -28,8 +26,7 @@ Do **not** guess from the operation name. For the operation you are calling, eit
 - open its `## Errors` table in `doc/controllers/{group}.md`, which lists the exception class per status
   code; or
 - read the `req.throwOn(<status>, <ErrorClass>, ...)` and `req.defaultToError(<ErrorClass>, ...)` lines
-  in the operation's own method body in `src/controllers/` — that folder is named by the
-  `ControllerNamespace` generator setting, so confirm the name in your own `src/`.
+  in the operation's own method body in `src/controllers/`.
 
 Because one operation can raise several classes, a catch ladder needs **one `instanceof` branch per
 class** you want to treat specially, with a final `instanceof ApiError` branch as the catch-all — or just
@@ -41,22 +38,28 @@ the single `ApiError` branch if you handle them uniformly.
 `result: T | undefined` (the **parsed** JSON payload) and `body: string | Blob | NodeJS.ReadableStream`
 (the **raw, unparsed** payload).
 
-`result` is populated only for the typed `ApiError` *subclasses*: the runtime JSON-parses the body into
-`result` only when the class registered by `req.throwOn(...)` is a subclass of `ApiError` —
-`@apimatic/core`'s request builder guards the parse with
-`if (errorConstructor.prototype instanceof ApiError)` under the comment
-`// Load result only for the sub classes of ApiError`. A bare `ApiError` — the `rb.defaultToError(ApiError)`
-path taken for any status the operation maps to no typed model — is thrown without that step, so its
-`result` is always `undefined` and only `body` is filled in. Read `body` on Case B.
+`result` is populated only for the typed `ApiError` *subclasses*. A bare `ApiError` — the
+`rb.defaultToError(ApiError)` path taken for any status the operation maps to no typed model — never
+gets that parse, so its `result` is always `undefined` and only `body` is filled in. Read `body` on
+Case B.
 
 Typed subclasses add **no members of their own** — they are one-liners
 (`export class {ErrorModel}Error extends ApiError<{Payload}> {}`), so the payload fields are on the
 inherited `err.result`, not on `err` directly.
 
+> **An error payload's members keep the spec's own field names — they are not camelCased like a
+> model's.** An ordinary model pairs an interface of camelCase members with a schema mapping each to
+> its wire name; the payload interface beside an error class carries the raw field names and has **no
+> schema** beside it, and the runtime `JSON.parse`s the body straight onto `result`. So a payload
+> documenting an underscored or dotted field is read at that
+> exact spelling — `err.result?.some_field`, never `err.result?.someField` — and carrying the casing
+> used everywhere else in the SDK across to an error is the way to get it wrong. Open the payload
+> interface in `src/errors/` and copy the member names from there.
+
 ### Case A — the status maps to a typed `{ErrorModel}Error`
 
 ```typescript
-import { Client, ApiError, {ErrorModel}Error } from '@paypal/paypal-server-sdk';
+import { Client, ApiError, {ErrorModel}Error } from 'paypal-server-sdklib';
 
 try {
   const response = await api.{operation}(/* ... */);
@@ -76,7 +79,7 @@ try {
 ```
 
 `ApiError` and every generated error class are exported from the **package root** — there is no
-`@paypal/paypal-server-sdk/errors` subpath (`.` and `./metadata` are the only exported subpaths).
+`paypal-server-sdklib/errors` subpath (`.` and `./metadata` are the only exported subpaths).
 
 ### Case B — the status maps to no typed model
 
@@ -84,7 +87,7 @@ try {
 into `result` on this path, so `err.result` is `undefined` here.
 
 ```typescript
-import { ApiError } from '@paypal/paypal-server-sdk';
+import { ApiError } from 'paypal-server-sdklib';
 
 try {
   const response = await api.{operation}(/* ... */);
@@ -116,10 +119,5 @@ needed to reach them.
   field — check whether `src/client.ts` hands `createAuthProviderFromConfig` a cloned config), that
   pre-flight throw never fires: the call goes out with an empty credential and returns a `401` as an
   `ApiError` instead. See **typescript-authentication**.
-- Automatic retries are gated by **several** generated defaults in `src/defaultConfiguration.ts` — read
-  the real values in your own SDK rather than assuming. `DEFAULT_RETRY_CONFIG.maxNumberOfRetries` (the
-  `Retries` setting) and `maximumRetryWaitTime` (the `BackoffMax` setting) both default to `0`, and
-  **either one at `0` means no retry happens at all**: every transient status surfaces on the first
-  attempt, `GET` and `PUT` included, until you raise both via `httpClientOptions.retryConfig`. Past
-  those, only the methods in `httpMethodsToRetry` and the statuses in `httpStatusCodesToRetry` are
-  retried, so methods outside that set surface without retry. See **typescript-configuration-resilience**.
+- Any retrying has already happened by the time the error reaches you — see
+  **typescript-configuration-resilience** for what this SDK retries.

@@ -5,9 +5,6 @@ description: 'Handle errors from the PayPal Server SDK Python SDK. Load before y
 
 # Error handling for an APIMatic Python SDK
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{operation}`,
-> `{controller}`, `{Name}Exception`) — replace it with the concrete identifier from the source.
-
 Operations **raise on non-success responses**. Everything raised by the SDK derives from `ApiException`
 (`paypalserversdk/exceptions/api_exception.py`), which carries:
 
@@ -80,16 +77,8 @@ for it not to be JSON at all.
 ## The typed-exception trap
 
 A typed exception unboxes the error body in its `__init__`, but only after checking that the parsed body
-is a JSON **object**:
-
-```python
-dictionary = APIHelper.json_deserialize(self.response.text)
-if isinstance(dictionary, dict):
-    self.unbox(dictionary)
-```
-
-When the server returns an empty body, HTML from a proxy, or a bare JSON scalar — exactly what a gateway
-timeout or a WAF block looks like — `unbox` never runs and **the typed attributes are never assigned**.
+is a JSON **object**. When the server returns an empty body, HTML from a proxy, or a bare JSON scalar —
+exactly what a gateway timeout or a WAF block looks like — **the typed attributes are never assigned**.
 Reading `e.{typed_field}` then raises `AttributeError` *from inside your except block*, replacing a
 useful error with a confusing one. Always reach for them with `getattr(e, '{typed_field}', None)`, and
 fall back to `e.response.text`.
@@ -100,26 +89,12 @@ fall back to `e.response.text`.
   underlying `requests` transport, not as `ApiException`. Catch them separately (or let them propagate)
   rather than assuming an `except ApiException` covers a network outage.
 
-  > **You cannot tell them apart by exception type, and for a write that distinction is the whole
-  > question.** The transport mounts a `urllib3` retry adapter on every session — unconditionally, even
-  > when the retry count is `0` — so an exhausted retry wraps the real cause in `MaxRetryError`, and
-  > `requests` then surfaces that as a plain **`ConnectionError`**. A read timeout and a refused
-  > connection arrive as the *same class*.
-  >
-  > That matters because they mean opposite things for a non-idempotent call: a refused connection never
-  > delivered the request, while a read timeout means the server may have processed it and you simply did
-  > not hear back. Treating the second as the first is how a retry becomes a duplicate.
-  >
-  > To distinguish them, walk the cause chain rather than matching the class — look for
-  > `urllib3.exceptions.ReadTimeoutError` (outcome unknown) versus `ConnectTimeoutError` /
-  > `NewConnectionError` (never sent):
-  >
-  > ```python
-  > def _root_cause(err):
-  >     while err is not None:
-  >         yield err
-  >         err = err.__cause__ or err.__context__
-  > ```
+  > **A read timeout and a refused connection arrive as the same class — a plain `ConnectionError` —
+  > and for a write that distinction is the whole question.** A refused connection never delivered the
+  > request; a read timeout means the server may have processed it and you simply did not hear back.
+  > Nothing you can configure separates them, so treat a `ConnectionError` on a non-idempotent call as
+  > **outcome unknown**.
+
 - **OAuth token acquisition** — an *explicit* `fetch_token()` raises the SDK's OAuth provider exception
   (generated per SDK — grep `exceptions/`, the casing varies). The **automatic** pre-call fetch swallows
   it and raises `AuthValidationException` from `apimatic_core` instead, which is **not** an

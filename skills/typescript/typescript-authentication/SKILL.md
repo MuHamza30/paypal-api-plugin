@@ -1,6 +1,6 @@
 ---
 name: 'typescript-authentication'
-description: 'Configure authentication on an APIMatic-generated TypeScript/Node.js API client — each scheme is an optional credentials property on the config object, set as an object literal when constructing the client (or later via withConfiguration) — Basic (username/password), Bearer token, API key (header or query), custom schemes, and OAuth 2.0 (client-credentials, authorization-code, password) plus combined AND/OR schemes. Use the moment you set credentials, an API key, a token, or OAuth on the PayPal Server SDK TypeScript SDK, or need to know which schemes its config object exposes — load it even after reading the config interface in the source, since the property type doesn''t tell you that OAuth fields are `oAuth`-prefixed (capital A), that the property name need not match the scheme name in the spec, how to persist a token across restarts, or that only the first satisfied OR alternative is ever sent.'
+description: 'Set credentials on the PayPal Server SDK TypeScript SDK. Load before configuring any scheme, or when a call comes back 401 or 403. The `Configuration` type won''t tell you the credentials property is often named after the auth type rather than the scheme, which grants carry `oAuthScopes`, or what a rejected token provider does to the client.'
 ---
 
 # Authenticating an APIMatic TypeScript SDK client
@@ -8,8 +8,6 @@ description: 'Configure authentication on an APIMatic-generated TypeScript/Node.
 **This API declares at least one security scheme.** APIMatic surfaces each one as an **optional credentials
 property on the config object**; set the one(s) your API uses when constructing the client (see
 `typescript-client-initialization`).
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{basicAuthProperty}`, `{Controller}`) — replace it with the concrete identifier from the source.
 
 To see which schemes a specific SDK accepts, read the **credentials properties on the `Configuration`
 interface in `src/configuration.ts`** — they are generated per-API and are the source of truth both for
@@ -31,7 +29,7 @@ auth adapters. See [reference.md](reference.md).
 ## Basic auth
 
 ```typescript
-import { Client } from '@paypal/paypal-server-sdk';
+import { Client } from 'paypal-server-sdklib';
 
 const client = new Client({
   {basicAuthProperty}: {
@@ -74,7 +72,7 @@ key(s) (`TS2741` when exactly one is missing, `TS2739` when several are).
 Every OAuth credential field is **`oAuth`-prefixed** — capital A:
 
 ```typescript
-import { Client } from '@paypal/paypal-server-sdk';
+import { Client } from 'paypal-server-sdklib';
 
 const client = new Client({
   {oAuthProperty}: {
@@ -84,8 +82,8 @@ const client = new Client({
 });
 ```
 
-**`oAuthScopes` is not on every grant.** The generator emits it only for a grant whose spec declares
-scopes — typically the authorization-code grant, and not client-credentials. If the credentials object in
+**`oAuthScopes` is not on every grant.** It is present only where the grant declares scopes —
+typically the authorization-code grant, and not client-credentials. If the credentials object in
 `src/configuration.ts` has no `oAuthScopes`, passing it is a TS excess-property error (TS2353) and there
 is no generated scope enum to import. Where it does exist it is typed to that enum, not `string[]`, and
 its members are listed under `### Scopes` in that grant's `doc/auth/*.md`.
@@ -118,23 +116,13 @@ const client = new Client({
 
 > ### ⚠ Your `oAuthTokenProvider` must never reject
 >
-> **A single rejection disables the client for the rest of the process.** The adapter keeps the token as
-> a *promise* shared by every call on that client, and each call reads it before replacing it:
+> **A single rejection disables the client for the rest of the process.** The rejected promise is cached
+> as the client's token, and every later call re-throws it before any request is built — so no retry or
+> timeout setting reaches it, and one transient failure (the store holding your token briefly
+> unreachable) is permanent for that client object.
 >
-> ```ts
-> let token = await lastOAuthToken;                 // ← throws here on every later call
-> lastOAuthToken = refreshOAuthToken(token, ...);   // ← never reached
-> ```
->
-> When your provider rejects, that rejected promise is what gets stored. The next call throws on the
-> **first** line and so never reaches the line that would replace it, and neither does the call after
-> that. One transient failure — the database holding your token being briefly unreachable — is
-> permanent for the lifetime of that client object, and no retry setting touches it because the failure
-> happens before any request is built.
->
-> So make the provider **resolve** in every path. Where you cannot produce a token, return an expired
-> one rather than throwing: the adapter will treat it as needing refresh and call you again next time,
-> which is the recoverable behaviour you want.
+> Make the provider **resolve** in every path. Where you cannot produce a token, return an expired one
+> rather than throwing: it is treated as needing refresh and you are called again next time.
 >
 > ```ts
 > oAuthTokenProvider: async (lastOAuthToken, authManager) => {
@@ -147,7 +135,8 @@ const client = new Client({
 > },
 > ```
 >
-> The sample above this note takes the short form for readability. In anything long-lived, wrap it.
+> To recover a client that has already rejected, rebuild it with `withConfiguration` (below) — it
+> returns a new client, and therefore a fresh token promise.
 
 To re-credential an **already-constructed** client, use `client.withConfiguration({...})` — it returns a
 **new** client rather than mutating the existing one:
@@ -168,4 +157,3 @@ For OAuth2 **authorization-code (3-legged)**, **resource-owner password**, **cus
 - A given SDK only exposes the credentials properties for the schemes its API uses; those names are generated per-API (hence the `{...Property}` placeholders above).
 - Set credentials when constructing the client, or attach them later with
   `client.withConfiguration({...})`, which returns a new client.
-- Keep secrets out of source — load them from environment variables (`process.env.MY_API_KEY`) or a secrets manager, never hardcode them.

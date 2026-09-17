@@ -14,14 +14,8 @@ constructor:
 | `http_client_instance` | supplying your own `requests.Session` (or an `HttpClientProvider`) — the in-process seam: no network, no global patching |
 | `http_call_back` | observing the request and response the SDK actually produced — the assertion seam |
 
-**Match the project's existing test stack — don't impose one.** Check the test suite's dependencies and
-existing tests, then mirror both its **runner** (pytest / unittest) and its **assertion style**. The
-samples below use pytest-style plain `assert` **purely for reference**; they show the seams and *what*
-to assert, not a mandated framework. Note that the SDK's own generated tests (when it ships a `tests/`
-directory) use `unittest`, and `pyproject.toml` declares an optional `testutils` extra for running them.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{controller}`,
-> `{operation}`) — replace it with the concrete identifier from the source.
+The samples below use pytest-style plain `assert` for reference only — mirror whatever the project
+already uses.
 
 ## The response catcher — copy the SDK's own pattern
 
@@ -126,6 +120,10 @@ For an operation with a typed exception, assert on that class instead — catchi
 pass if the SDK stopped raising the typed one, which is the regression the test exists to catch.
 
 ## Assert the outgoing request
+
+**`doc/` does not carry an operation's HTTP verb or URL**, and you need both to stub a transport. The
+reliable source is the operation's own request builder: grep `.path(`, `.http_method(` and `.server(` in
+`paypalserversdk/controllers/*.py`.
 
 The catcher's `on_before_request` receives the SDK's `HttpRequest`, so verb, URL, headers, query
 parameters and body are all assertable without a network:

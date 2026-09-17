@@ -1,24 +1,21 @@
 ---
 name: 'php-error-handling'
-description: 'Handle errors from an APIMatic-generated PHP SDK — where an error status surfaces is fixed at generation time by two independent settings, and one of them is already settled: this SDK returns the `ApiResponse` wrapper, so a non-2xx comes back inside it and never raises, leaving only whether `src/Exceptions/ApiException.php` exists (without it nothing is throwable at all, not even a network failure). Use the moment you write a try/catch around a call, inspect a status code, or read an error body from the PayPal Server SDK PHP SDK — load it even after reading the source, since a class name alone won''t warn you that your `catch` may match nothing, that `getCode()` is `0` on transport failures, or that a payload getter may be renamed away from its JSON name.'
+description: 'Handle errors from the PayPal Server SDK PHP SDK. Load before your first try/catch around a call, or when building an error-translation layer. The class list won''t tell you whether a non-2xx throws at all in this SDK, where the error payload actually lives, or that an inline `catch` inside a namespaced file never matches.'
 ---
 
 # Error handling for an APIMatic PHP SDK
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{operation}`,
-> `{Typed}Exception`) — replace it with the concrete identifier from the source.
-
 ## First: where does a failure surface?
-Two independent generator settings decide it, and **this SDK has already settled the first**: it returns the
-`ApiResponse` wrapper — `ReturnCompleteHttpResponse` is on, or `ThrowForHttpErrorStatusCodes` is off, either
-of which produces it — so `src/Http/ApiResponse.php` is generated, every operation returns the wrapper, and
+Two independent facts about this SDK decide it, and **the first is already settled**: it returns the
+`ApiResponse` wrapper — either it was built to return complete responses, or it never raises on an error
+status, either of which produces the wrapper — so `src/Http/ApiResponse.php` is generated, every operation returns the wrapper, and
 **an error status never raises**. Each handler chain ends `->returnApiResponse()`, which makes the runtime
 return the wrapper on a failure instead of throwing.
 
 One question is left, and the filesystem answers it — settle it before you write any `try`:
 
-> **Does `src/Exceptions/ApiException.php` exist?** (it is skipped under the
-> `PhpMapErrorTypesInCompleteResponse` build)
+> **Does `src/Exceptions/ApiException.php` exist?** (an SDK that maps its error types into the response
+> omits it)
 > - **Yes** → there is something throwable, but only for a **transport** failure; a non-2xx still comes
 >   back inside the wrapper.
 > - **No** → nothing is throwable at all. The classes under `src/Exceptions/` are plain error *models*,
@@ -34,7 +31,7 @@ That leaves two builds this SDK can be:
 Cross-check the mapped build against `src/Utils/CompatibilityConverter.php`: with no `ApiException` to
 build, its `createApiException()` body is `return null;`.
 
-This SDK does **not** set `Nullify404`, so nothing converts a `404` into `null`: it surfaces exactly like
+Nothing in this SDK converts a `404` into `null`: it surfaces exactly like
 any other non-2xx, by the mechanism above, and no `nullOn404()` appears anywhere in the controllers.
 
 ## The wrapper builds — errors arrive inside the response
@@ -131,8 +128,8 @@ Two places tell you, both authoritative:
 
 - **`doc/controllers/{group}.md`** — every operation has an *Errors* table mapping HTTP status to the
   generated error class.
-- **The operation body in the controller directory** — `src/Controllers/` by default, but named after the
-  `ControllerPostfix` / `ControllerNamespace` setting (`src/Apis/` when the postfix is `Api`). Find it
+- **The operation body in the controller directory** — `src/Controllers/` by default, but named per SDK
+  after the controller postfix or its namespace (`src/Apis/` when the postfix is `Api`). Find it
   with a grep for `throwErrorOn` under `src/`: the chain reads
   `->throwErrorOn('<status>', ErrorType::init(…, {Typed}Exception::class))`, and a `throwErrorOn('0', …)`
   entry is the catch-all default for otherwise-unmapped statuses. **The chain is the status→class map, not

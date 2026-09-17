@@ -1,6 +1,6 @@
 ---
 name: 'java-calling-endpoints'
-description: 'Call API operations on an APIMatic-generated Java SDK — operations are methods on a controller you get from the client with `client.get{Controller}()`; a blocking method declaring `throws ApiException, IOException` is always generated, with an `...Async()` twin returning `CompletableFuture<T>` when the SDK was built in asynchronous mode; parameters are either positional or collapsed into a single `{Operation}Input` object — the `CollapseParamsToArray` setting decides it for every operation with more than one parameter, so neither form is the norm and you read the signature; and every return type is wrapped in `ApiResponse<T>`, because this SDK was generated in complete-response mode. Use whenever invoking an endpoint, building a request body, working out which parameters are required, or consuming a response from the PayPal Server SDK Java SDK — load it even after reading the method signature in the source, since the signature won''t warn you about the sync/async pair or the collapsed `Input` object.'
+description: 'Call operations on the PayPal Server SDK Java SDK. Load before the first call, and when building a request body or reading a response. The signature won''t tell you the controller package and class suffix are both per-SDK, that every operation has a blocking and an async form, or what the return type wraps.'
 ---
 
 # Calling endpoints on an APIMatic Java SDK
@@ -19,18 +19,14 @@ import {rootPackage}.exceptions.ApiException;
 ```
 
 Controllers live in `<root>/<controllerPackage>/`, one class per API group. **The package name and the
-class suffix are both generator settings** — `controllers`/`Controller` by default. The `ControllerNamespace`
-setting renames the package outright and wins when it is set; otherwise a controller postfix renames the
-package *and* the class suffix together. The suffix may also be absent entirely, so the accessor may be
+class suffix are both named per SDK** — `controllers`/`Controller` by default, and either can be
+something else. The suffix may also be absent entirely, so the accessor may be
 `getPetsController()`, `getPetsApi()` or `getPets()`. **Take the package from the `import` block at the top of
 `{Api}Client.java` and the accessor from its `get...()` methods**; `doc/client.md` lists them all.
 
-**This SDK was generated without `GenerateInterfaces`**, so each group emits a single `final` class and
+**This SDK ships no controller interfaces**, so each group emits a single `final` class and
 no interface: `{Controller}.java` *is* the implementation, and it is the file to open for an exact
 signature. The client implements `Configuration` directly.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Controller}`,
-> `{operation}`, `{Model}`) — replace it with the concrete identifier from the source.
 
 ## Two method shapes: blocking and `...Async()`
 
@@ -76,14 +72,19 @@ controller.{operation}Async(/* ... */)
 
 ## Parameters — positional, or one collapsed `Input` object
 
-Which form an operation uses is decided by the **`CollapseParamsToArray`** code-generation setting (or the
-per-endpoint `CollectParameters` flag), applied to every operation with **more than one non-constant
-parameter**. Neither form is the norm — in a build with collapsing on, nearly every multi-parameter
+Which form an operation uses is fixed when the SDK is generated — for the whole SDK, or for that one
+endpoint on its own — and only ever applies to an operation with **more than one non-constant
+parameter**. Neither form is the norm — in a collapsing build nearly every multi-parameter
 operation takes an `{Operation}Input`, and in a build without it none does. **Read the signature in the
 controller class the client's `get...()` accessor returns** before you write the call.
 
-An operation that was not collapsed — and every single-parameter operation, whatever the setting — takes
-its parameters **positionally**, in the order the method declares them:
+That count is of **declared** parameters, not of required ones: the optional ones count towards it too,
+so an operation taking one required path parameter plus a few optional headers or filters is a
+multi-parameter operation and does collapse on such a build. Only an operation declaring exactly one
+parameter, with no optional ones behind it, stays bare.
+
+An operation that was not collapsed — and every genuinely one-parameter operation, whatever the setting —
+takes its parameters **positionally**, in the order the method declares them:
 
 ```java
 {ReturnType} result = controller.{operation}(petId, status);
@@ -135,7 +136,7 @@ import {rootPackage}.models.{Model};
 
 Models also expose a public all-args constructor, so `new {Model}(a, b, c)` works too — but the
 positional constructor breaks the moment a regeneration adds a field, while the `Builder` does not.
-This SDK was generated **without** immutable models, so every field also has a plain setter and the
+**This SDK's models are mutable**, so every field also has a plain setter and the
 model has a no-arg constructor.
 
 For enums, unions, dates, collections and nullable-optional
@@ -144,9 +145,8 @@ fields, load **java-models**.
 ## Reading the response
 
 
-> **This SDK was generated in complete-response mode** (`ReturnCompleteHttpResponse`), so every
-> non-paginated return type is wrapped in `ApiResponse<T>` from `<root>/http/response/`. That applies
-> to the whole SDK at once.
+> **Every non-paginated return type in this SDK is wrapped in `ApiResponse<T>`**, from
+> `<root>/http/response/`. That applies to the whole SDK at once.
 
 ```java
 ApiResponse<{Model}> response = controller.{operation}(petId);

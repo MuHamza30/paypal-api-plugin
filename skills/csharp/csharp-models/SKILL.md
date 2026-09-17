@@ -1,12 +1,9 @@
 ---
 name: 'csharp-models'
-description: 'Construct and read the non-obvious model shapes of an APIMatic-generated C# SDK — data models are plain classes built with an object initializer or an all-fields constructor; where a model emits `ShouldSerialize{Field}()`, an optional-and-nullable property flips a private serialize flag on assignment and `Unset{Field}()` is what takes its key back off the wire; enums are C# `enum` value types whose wire values live in `[EnumMember]`; oneOf/anyOf containers are built with static `From{Variant}(...)` factories and read with `Match`/`MatchSome`; extra JSON arrives through an inherited `AdditionalProperties` dictionary, if the SDK emits `Models/BaseModel.cs` at all. Use when building a request body or reading a response field of the PayPal Server SDK C# SDK that is a union, enum, collection or optional — load it even after reading the property type in the source, since `DateTime?` alone won''t tell you that assigning `null` still emits the key, or that a union''s case classes are `private sealed` and `Match` is the only reader.'
+description: 'Work with models from the PayPal Server SDK C# SDK. Load before building a request payload or mapping a response onto your own types. The class won''t tell you which fields serialize on a model you never touched, how optional-and-nullable state is tracked, how a oneOf/anyOf container matches, or where unknown fields land.'
 ---
 
 # Working with models in an APIMatic C# SDK
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Model}`,
-> `{Field}`, `{EnumType}`, `{Union}`) — replace it with the concrete identifier from the source.
 
 Data models are plain classes under `Models/`, namespace `PaypalServerSdk.Standard.Models`. **If** the API
 declares a `oneOf`/`anyOf`, containers sit beside them in `Models/Containers/` — `ls` that folder
@@ -77,16 +74,16 @@ The all-fields constructor assigns an optional-and-nullable argument **only when
 `new {Model}(requiredA, optionalC: null)` leaves the flag off and omits the key; a plain-optional
 argument is assigned unconditionally.
 
-> **The serialize flag is not always off to begin with.** Where the spec gives a field a **default value**,
-> the generator initialises its flag to `true` in the field-initialiser map, so the key ships with the
-> spec's default on a model you never touched — `new {Model}{ Required = "x" }` can serialize
-> `"{field}":"{specDefault}"`. `Unset{Field}()` is then the *only* way to take it back off the wire.
+> **The serialize flag is not always off to begin with.** A field with a **default value** has its flag
+> initialised to `true`, so the key ships with that default on a model you never touched — `new {Model}{
+> Required = "x" }` can serialize `"{field}":"{fieldDefault}"`. `Unset{Field}()` is then the *only* way
+> to take it back off the wire.
 > Two consequences worth checking before you trust a payload:
 >
 > - `ShouldSerialize{Field}()` on a fresh object can be `true`. Read it rather than assuming `false`.
 > - Some SDKs also carry a second map (`hasPropertySetterCalledFor`) driving a getter that returns the
->   spec default instead of `null` when nothing has assigned the property — so `if (m.{Field} == null)` is
->   not a reliable "was it set?" test either.
+>   field's default instead of `null` when nothing has assigned the property — so `if (m.{Field} == null)`
+>   is not a reliable "was it set?" test either.
 >
 > **Do not treat "no `shouldSerialize` entry is `true`" as "nothing ships by default"** — a
 > required non-nullable enum or scalar also ships its zero value on an untouched model, by the separate rule
@@ -173,10 +170,10 @@ with `is` — the shape is in [reference.md](reference.md).
 
 ## Unknown / future fields
 
-This SDK does **not** set `ExtendedAdditionalPropertiesSupport`, so there is **no indexer** — `m["key"]`
+This SDK does **not** carry the extended additional-properties surface, so there is **no indexer** — `m["key"]`
 does not compile. Instead, check for `Models/BaseModel.cs`:
 
-- **If it exists**, this build set `EnableAdditionalModelProperties`. Models are generated as
+- **If it exists**, models are generated as
   `class {Model} : BaseModel`, inheriting one
   `[JsonExtensionData] public Dictionary<string, object> AdditionalProperties { get; set; }`. Read and
   write that property directly. **It is `null` until something assigns a dictionary** — no constructor

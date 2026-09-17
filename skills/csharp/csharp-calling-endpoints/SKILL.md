@@ -1,6 +1,6 @@
 ---
 name: 'csharp-calling-endpoints'
-description: 'Call API operations on an APIMatic-generated C# SDK — operations are methods on a controller you read off the client as a property (`client.{Controller}`), never a class you construct; an operation is generated as a blocking `{Operation}` alongside an `async Task<...> {Operation}Async(..., CancellationToken cancellationToken = default)` twin, with parameters positional (or collapsed into one input model) and optionals carrying the spec''s own defaults. Also covers the `ApiResponse<T>` envelope, `void` operations, `FileStreamInfo` uploads and `Stream` downloads. Use whenever invoking an endpoint, building a request body, or consuming a response from the PayPal Server SDK C# SDK — load it even after reading the signature, since it won''t warn you that a `void` operation hands back no status code.'
+description: 'Call operations on the PayPal Server SDK C# SDK. Load before the first call, and when building a request body or reading a response. The signature won''t tell you controllers are properties on the client, that sync and async forms differ in which one takes a `CancellationToken`, or what an optional parameter''s default actually puts on the wire.'
 ---
 
 # Calling endpoints on an APIMatic C# SDK
@@ -20,12 +20,8 @@ var response = await controller.{Operation}Async(/* ... */);
 The property is named after the controller class and is backed by a `Lazy<T>`, so the instance is
 created on first access and shared thereafter (see **csharp-client-initialization**). Every
 controller's constructor is **`internal`**, so `new {Controller}(...)` does not compile. **The class
-suffix is a generator setting** — some builds carry none — so read the names off the **Controllers**
+suffix varies per SDK** — some builds carry none — so read the names off the **Controllers**
 table in `doc/client.md`.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{Controller}`, `{Operation}`, `{Model}`, `{EnumType}`) — replace it with the concrete identifier from
-> the source.
 
 ## Two method shapes — blocking and `{Operation}Async`
 
@@ -62,13 +58,12 @@ public async Task<ApiResponse<{Model}>> {Operation}Async(
   `{Operation}Async({Operation}Input input, CancellationToken cancellationToken = default)` — note the
   controller declares that type **unqualified**, even though you need the `Models` alias to name it from
   your own code. It happens when the operation has **more than one** non-constant parameter *and* either
-  the build set `CollapseParamsToArray` or the spec set that operation's own collect-parameters flag, so
+  this build collapses them, or that operation was built to collapse its own, so
   the two forms mix freely inside one controller and you must **read each signature**. The name is usually
   `{Operation}Input`, but a spec-supplied collection name drops the `Input` suffix and a clash across
   groups prefixes the group — so take it from the signature, never build it.
-- **An optional parameter's default is not always `null`.** The generator emits the spec's default
-  *and* re-applies it on the wire, so passing `null` sends the default rather than dropping the
-  parameter.
+- **An optional parameter's default is not always `null`.** The declared default is also re-applied on
+  the wire, so passing `null` sends the default rather than dropping the parameter.
 - **`DateTime` parameters are formatted per parameter** — one may go out as a full ISO-8601 timestamp
   and another in the same SDK as `yyyy-MM-dd`; read the `.Query(...)` line when it matters. An endpoint
   accepting unmodelled query or form values also carries a trailing `Dictionary<string, object>` bag
@@ -118,7 +113,7 @@ method**, tagged `Form` in the doc's table — there is no parts collection to a
 ## Reading the response
 
 
-> This SDK was generated with `ReturnCompleteHttpResponse`, so every non-void, non-paginated operation
+> Every non-void, non-paginated operation in this SDK
 > returns an `ApiResponse<T>` envelope. That applies to the whole SDK at once.
 
 ```csharp

@@ -2,7 +2,7 @@
 
 
 
-Full matrix of auth schemes the APIMatic TypeScript generator supports. The credentials properties on
+Every auth scheme shape you can meet in one of these SDKs. The credentials properties on
 the `Configuration` interface in `src/configuration.ts` are the source of truth: both the **property
 names** and the **inner field names** are generated per-API, and the property name is often derived from
 the auth *type* rather than the scheme name in the spec. Set every credentials property as an object
@@ -179,8 +179,7 @@ Consequence: configuring several OR alternatives is **not** belt-and-braces — 
 one is ever sent, and the others are silently ignored. Configure just the scheme you intend to use.
 
 The order is the one in the `req.authenticate([...])` call in the operation's method in
-`src/controllers/` (that folder is named by the `ControllerNamespace` generator setting, so confirm the
-name in your own `src/`), mirrored by the `## Authentication` line in `doc/controllers/*.md`. The keys inside
+`src/controllers/`, mirrored by the `## Authentication` line in `doc/controllers/*.md`. The keys inside
 those maps are the **scheme keys** from `src/authProvider.ts` — a camel-cased form of the scheme name in
 the spec (`APIKeyHeader` → `aPIKeyHeader`, `oauth2` → `oauth2`). They are a different name from the
 credentials property you set on `Configuration`, which is derived from the auth *type* (that same

@@ -1,13 +1,9 @@
 ---
 name: 'csharp-authentication'
-description: 'Configure authentication on an APIMatic-generated C# SDK — every scheme is a sealed `{Scheme}Model` built through its nested `Builder` (required credentials positional in the Builder constructor and null-checked there, optional ones fluent setters) and handed to a `.{Scheme}Credentials(model)` setter on the client `Builder`; covers Basic, API key in a header or query parameter, bearer token, OAuth 2.0 client credentials with its automatic fetch/refresh and persistence callbacks, and the `I{Scheme}Credentials` read side. Use the moment you set credentials, an API key, a token, or OAuth on the PayPal Server SDK C# SDK — load it even after reading the setters in the source, since the setter name alone won''t tell you that `Build()` silently nulls a scheme you never configured, or that `IsTokenExpired()` reports on the seed token rather than the auto-refreshed one.'
+description: 'Set credentials on the PayPal Server SDK C# SDK. Load before configuring any scheme, or when a call comes back 401 or 403. The setter name won''t tell you it can drop or double the `Credentials` suffix, that required values are positional on the model''s constructor and throw `ArgumentNullException` there rather than on the first call, or which getter reads the model back.'
 ---
 
 # Authenticating an APIMatic C# SDK client
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{Scheme}Model`, `{Scheme}Manager`, `{ScopesEnum}`) — replace it with the concrete identifier from
-> the source. Left in place it is a **syntax error**, not an unresolved name.
 
 The API spec decides which schemes exist. Set every scheme your endpoints need **while you build the
 client** — a built client has no credential setter (see **csharp-client-initialization**).
@@ -27,10 +23,9 @@ resolves it.** The usual form is the emitted scheme name with `Credentials` appe
 (`.Oauth2ClientCredentialsCredentials(...)`). The suffix is dropped **only** when the SDK has exactly one
 scheme *and* that scheme is an OAuth 2 grant type (`.ClientCredentialsAuth(...)`, interface
 `IClientCredentialsAuth`). Ending in `Auth` is **not** the trigger — a `BasicAuth` scheme alongside others
-still emits `.BasicAuthCredentials(...)` and `IBasicAuthCredentials`. The emitted name also need not match
-the spec's. Read the `Builder`'s method list in
-`PaypalServerSdkClient.cs` and the file names under `Authentication/`. The shapes to recognise, and the three
-ways the pattern breaks, are in [reference.md](reference.md).
+still emits `.BasicAuthCredentials(...)` and `IBasicAuthCredentials`. Read the `Builder`'s method list in
+`PaypalServerSdkClient.cs` and the file names under `Authentication/`; the shapes to recognise are in
+[reference.md](reference.md).
 
 > **This SDK's schemes, setters, credential models and required arguments are already resolved** in the
 > *This SDK's map* table at the top of **csharp-getting-started**. Read that first — everything below is
@@ -232,7 +227,6 @@ auth** and **no-auth**, the AND/OR composition rules, and binding credentials fr
 
 ## Notes
 
-- **Keep secrets out of source.** Read them from the environment or a secrets manager and pass them in.
 - **Rotating credentials means a new client.** `client.ToBuilder()` carries the credential models over,
   so `client.ToBuilder().{Scheme}Credentials(newModel).Build()` is the rotation — but it does **not**
   carry the HTTP client configuration; see **csharp-client-initialization**.

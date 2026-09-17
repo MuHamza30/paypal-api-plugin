@@ -21,23 +21,10 @@ recognise rather than names to construct:
 | Client getters | the manager getter mirrors the setter's name — `client.{Scheme}Credentials` when the setter carries the suffix, bare `client.{Scheme}` when it does not; the model getter is always `client.{Scheme}Model` | `PaypalServerSdkClient.cs` |
 | Config bind target | `class {Scheme}ModelOptions`, under the JSON key matching the setter | `{Scheme}Manager.cs` |
 
-**Three ways the pattern breaks, all seen in real SDKs:**
-
-1. **A lone OAuth-grant scheme drops the suffix.** The generator emits the bare name when the SDK has
-   exactly **one** scheme *and* that scheme is an OAuth 2 grant type; otherwise it appends `Credentials`.
-   So a single client-credentials scheme gives `.ClientCredentialsAuth(model)` with interface
-   `IClientCredentialsAuth` — *no* `Credentials` — while the same scheme alongside a second one keeps it.
-   Where the suffix is appended the word can double: `oauth2ClientCredentials` gives
-   `.Oauth2ClientCredentialsCredentials(...)`. Both are real; neither is inferable, so take the names from
-   the **Authentication** table in **csharp-getting-started** rather than applying this rule by hand.
-2. **The emitted name need not match the spec.** A spec scheme called `BearerAuth` can emit as
-   `ClientCredentialsAuth`.
-3. **`{Scheme}ModelOptions` can differ in casing from the model and manager.** One SDK emits
-   `VZM2mTokenModel` and `VZM2mTokenManager` but `VZM2MTokenModelOptions`.
-
-So: **grep the client `Builder` for the setter, `Authentication/` for the interface file name, and the
-client class for the manager getter.** Do not derive any of them from the spec. The getter always
-mirrors the setter, so if the setter dropped the suffix the getter has too.
+**Grep the client `Builder` for the setter, `Authentication/` for the interface file name, and the
+client class for the manager getter** — none of the three is inferable, and `{Scheme}ModelOptions` can
+differ in casing from both the model and the manager. The getter always mirrors the setter, so if the
+setter dropped the suffix the getter has too.
 
 ## The non-OAuth schemes
 
@@ -133,7 +120,7 @@ properties*; the `Parameters(parameters => parameters.Header(...))` call that wo
 `AuthUtility.AppendCustomAuthParams(config, request)` — likewise a stub. So a custom scheme that looks
 fully configurable still authenticates nothing: values you set are stored and silently dropped.
 
-Treat a custom scheme as **"this SDK cannot authenticate this scheme yet"** — regenerate once the spec
+Treat a custom scheme as **"this SDK cannot authenticate this scheme yet"** — it works once the SDK
 describes it properly, or send the credential yourself through a `DelegatingHandler` on the
 `HttpClientInstance` seam (**csharp-testing** shows the seam). Never edit the SDK. And do not read
 `internal` as the tell: managers are `internal` in most builds regardless of scheme, so reach every

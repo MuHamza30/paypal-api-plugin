@@ -1,12 +1,12 @@
 ---
 name: 'ruby-client-initialization'
-description: 'Construct and configure an APIMatic-generated Ruby SDK client — `Client.new` takes a flat list of keyword arguments (environment, credential objects, timeout, retries, Faraday connection/adapter, proxy settings, http_callback, logging configuration), each with a default baked in at generation time, plus a `config:` escape hatch that accepts a ready-made `Configuration` and overrides every other argument, a `Client.from_env` factory, and `config.clone_with(...)` for deriving a variant. Use the moment you call `Client.new`, pick an `Environment` constant, or wire the PayPal Server SDK Ruby SDK client into your app — load it even after reading the constructor in the source, since the keyword list shows the arguments but not that `config:` silently wins, that controllers are memoized readers on the client, or the reuse-one-client lifetime guidance.'
+description: 'Construct and configure the PayPal Server SDK Ruby SDK client. Load before you call `Client.new` or wire the client into an application. The argument list won''t tell you settings are flat keyword arguments with no builder, that controllers are memoized readers, or how `clone_with` treats the arguments you leave out.'
 ---
 
 # Initializing an APIMatic-generated Ruby SDK client
 
-This applies to **any** APIMatic-generated Ruby SDK (APIMATIC v3.0). Names below are concrete for this
-SDK; replace the remaining `{...}` placeholders with the real names from its source:
+Names below are concrete for this SDK; replace the remaining `{...}` placeholders with the real names
+from its source:
 
 - `{controller_name}` — a controller reader method on the client.
 - `{Name}` — an `Environment` constant.
@@ -32,7 +32,7 @@ client = PaypalServerSdk::Client.new(
 simply forwards them into a new `Configuration`. Open
 `lib/paypal_server_sdk/configuration.rb` for the authoritative list and the real defaults — the set varies
 per API. In this build that set includes one credential argument per declared scheme, any server template
-parameters the spec declares, and a `logging_configuration:`.
+parameters the API declares, and a `logging_configuration:`.
 
 The arguments common to every build:
 
@@ -60,7 +60,7 @@ Environments are frozen string constants on an `Environment` class in
 `lib/paypal_server_sdk/configuration.rb`. **Read that class for the real constant names before naming
 one.**
 
-The names come from the API spec's server list, so do not assume a particular one exists — there may be
+Do not assume a particular name exists — there may be
 no production member at all. A name also does **not** imply a live host: match each constant to the URL it
 actually resolves to in the `ENVIRONMENTS` hash in the same file.
 
@@ -68,8 +68,7 @@ actually resolves to in the `ENVIRONMENTS` hash in the same file.
 client = PaypalServerSdk::Client.new(environment: PaypalServerSdk::Environment::{Name})
 ```
 
-There is **no free-form base-URL argument.** `Configuration#get_base_uri(server)` looks the URL up in the
-`ENVIRONMENTS` hash, keyed by the selected environment and then by a `Server` constant (an API with
+`Configuration#get_base_uri(server)` looks the URL up in the `ENVIRONMENTS` hash, keyed by the selected environment and then by a `Server` constant (an API with
 multiple servers generates several; endpoints pick their own). When the spec declares server template
 parameters, those become their own `Configuration` arguments and are substituted into the URL by
 `get_base_uri` — grep that method to see whether this SDK has any.
@@ -131,8 +130,8 @@ result = client.{controller_name}.{operation}
 ```
 
 Read the reader names off `lib/paypal_server_sdk/client.rb` (or the controller/API table near the bottom
-of `doc/client.md` — it is headed `## Apis` or `## Controllers` after the controller folder, whose name
-follows the generator's controller-namespace setting) — they are snake_cased from the API's group names,
+of `doc/client.md` — it is headed `## Apis` or `## Controllers` after the controller folder, which is
+named per SDK) — they are snake_cased from the API's group names,
 so don't guess them. See
 **ruby-calling-endpoints** for the call itself.
 
@@ -166,14 +165,6 @@ client = PaypalServerSdk::Client.new(config: new_config)
 `clone_with` returns a **new** `Configuration` carrying the current values for everything you don't pass;
 it never mutates the original. Note it fills a missing argument with `||=`, so passing an explicit
 `false` or `0` cannot clear a truthy existing value.
-
-## Dependency injection
-
-Ruby has no single DI standard. Assign the constructed client to a constant or a memoized module-level
-accessor (above), or register it in whatever container the app already uses (`dry-container`, a Rails
-initializer, a plain factory method) with a single provider that constructs it once. Inject the client —
-or a narrow wrapper of your own over the operations you use — rather than constructing inside consumers,
-so tests can substitute a stub (see **ruby-testing**).
 
 ## Next
 

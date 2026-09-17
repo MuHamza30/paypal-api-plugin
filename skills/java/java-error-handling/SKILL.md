@@ -1,12 +1,9 @@
 ---
 name: 'java-error-handling'
-description: 'Handle errors from an APIMatic-generated Java SDK — every blocking operation declares two checked exceptions, `ApiException` for any non-2xx response and `IOException` for transport failures; errors with a modelled body throw a typed subclass under `<root>/exceptions/` that must be caught first, and a JSON field called `message` surfaces on it as `getMessageField()`; the status code accessor is `getResponseCode()` and the request/response pair is `getHttpContext()`. Use the moment you write a try/catch around a call on the PayPal Server SDK Java SDK, build an exception-translation layer, or read a status code or error body — load it even after reading the throws clause in the source, since it won''t tell you which accessor carries the status code or that the async form buries everything in a CompletionException.'
+description: 'Handle errors from the PayPal Server SDK Java SDK. Load before your first try/catch around a call, or when building an error-translation layer. The throws clause won''t tell you the status code accessor is `getResponseCode()`, which errors carry a typed subclass and which do not, or that the async form buries everything in a `CompletionException`.'
 ---
 
 # Error handling for an APIMatic Java SDK
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Controller}`,
-> `{operation}`, `{Operation}Exception`) — replace it with the concrete identifier from the source.
 
 Every blocking operation declares **two** checked exceptions:
 
@@ -102,8 +99,8 @@ Always null-check `getHttpContext()` before dereferencing it.
 
 A typed exception's fields come from the error schema, but a Java exception already owns some of those
 names. When a field's accessor would collide with `getMessage`, `getResponseCode`, `getCause`,
-`getSuppressed`, `getStackTrace`, `getLocalizedMessage` or `getClass`, the generator appends `Field` to
-the property:
+`getSuppressed`, `getStackTrace`, `getLocalizedMessage` or `getClass`, the property carries a `Field`
+suffix:
 
 ```java
 // JSON: { "code": 400, "message": "Bad request" }
@@ -154,13 +151,10 @@ Testing `exception instanceof ApiException` on the `CompletionException` itself 
   getter `{Api}Client.java` actually declares — `get{Scheme}Credentials()` in a multi-scheme SDK, the
   suffix-less `getClientCredentialsAuth()` when that grant is the API's only scheme — and catch it there.
   Fix the credentials rather than the catch block; see **java-authentication**.
-- **Retries happen before the exception reaches you**, and only for the HTTP methods and status codes
-  baked into the generated `HttpClientConfiguration.Builder()` constructor — and only when **your own
-  code** has raised `numberOfRetries` above the runtime default of `0`, since the generated constructor
-  never sets it. Read that constructor rather than assuming a `POST` was retried. See
-  **java-configuration-resilience**.
-- **A 404 throws like any other non-2xx.** This SDK does **not** set `Nullify404` — every operation's
-  request builder carries an explicit `.nullify404(false)` — so there is no silent `null` return to guard
+- **Retries happen before the exception reaches you** — see **java-configuration-resilience** for what
+  this SDK retries, and do not assume a `POST` was.
+- **A 404 throws like any other non-2xx.** Every operation's request builder in this SDK carries an
+  explicit `.nullify404(false)` — so there is no silent `null` return to guard
   against and the `catch` ladder above covers 404 too.
 - **Do not leak SDK exceptions across your own API boundary.** Translate them in one place into your own
   domain errors, keying off `getResponseCode()` and the typed payload, so callers do not depend on the

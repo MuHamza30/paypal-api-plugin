@@ -1,12 +1,12 @@
 ---
 name: 'typescript-client-initialization'
-description: 'Construct and configure an APIMatic-generated TypeScript/Node SDK client — `new Client(config?: Partial<Configuration>)` takes a single options object (environment, credential objects, and a nested `httpClientOptions` for timeout/retries/proxy/agents), a static `Client.fromEnvironment(...)` factory, a `client.withConfiguration(...)` clone, and controllers you instantiate yourself with `new {Controller}(client)`. Use the moment you call `new Client(...)`, build its `Configuration`, pick an `Environment`, or wire the PayPal Server SDK TypeScript SDK client into your app — load it even after reading the constructor in the source, since the signature shows the arguments but not the options-object shape, the instantiate-the-controller-yourself rule, or the reuse-one-client lifetime guidance.'
+description: 'Construct and configure the PayPal Server SDK TypeScript SDK client. Load before you call `new Client({...})` or wire the client into an application. The type won''t tell you the configuration is one flat options object, that you instantiate controllers yourself, or which generated factory throws for every input.'
 ---
 
 # Initializing an APIMatic-generated TypeScript SDK client
 
-This applies to **any** APIMatic-generated TypeScript SDK (APIMATIC v3.0). Package and type names below
-are concrete for this SDK; replace the remaining `{...}` placeholders with the real names from its source:
+Package and type names below are concrete for this SDK; replace the remaining `{...}` placeholders with
+the real names from its source:
 
 - `{Controller}` — a controller class exported from the package root. Its postfix (`Api`, `Controller`,
   …) is the SDK's controller-naming setting, fixed at generation time; read the real `export class`
@@ -18,14 +18,12 @@ The SDK exports a single `Client` class. You construct it with **one options obj
 `Partial<Configuration>` — every field is optional and missing fields fall back to `DEFAULT_CONFIGURATION`:
 
 ```ts
-import { Client, Environment } from '@paypal/paypal-server-sdk';
+import { Client, Environment } from 'paypal-server-sdklib';
 
 const client = new Client({
   environment: Environment.{Name},
   // auth credential objects — see typescript-authentication
-  timeout: 30000,                  // ms; 0 disables the timeout. The default is baked in at
-                                   // generation time — read DEFAULT_CONFIGURATION.timeout in
-                                   // src/defaultConfiguration.ts; do not assume it is 0.
+  timeout: 30000,                  // ms; 0 disables the timeout
   httpClientOptions: {             // retries, proxy, agents — see typescript-configuration-resilience
     // ...
   },
@@ -43,12 +41,12 @@ argument. Open `src/configuration.ts` for the exact field set; it varies per API
 Environments are members of an `enum Environment` in `src/configuration.ts`. **Read the enum for the
 real member names before naming one.**
 
-Member names come from the API spec's server list, so do not assume a particular one exists — there may
+Do not assume a particular member exists — there may
 be no `Production` at all. A name also does **not** imply a live host: match each member to the base URL
 it actually resolves to in `src/client.ts`, not to what its name suggests.
 
 The base URL is **derived** from the selected environment (plus any server parameters like `port`) by the
-`getBaseUri` resolver in `src/client.ts` — there is no free-form `baseUrl` option. The default environment
+`getBaseUri` resolver in `src/client.ts`. The default environment
 is whatever `DEFAULT_CONFIGURATION.environment` sets.
 
 An SDK may also declare several **named servers** (a `Server` union in `src/clientInterface.ts`).
@@ -104,11 +102,8 @@ names are in `Configuration.fromEnvironment` in `src/configuration.ts` — grep 
 through schema validation and **throws** on invalid input. (In Node, load a `.env` with `dotenv` first.)
 
 > A `Client.fromJsonConfig(jsonString)` factory is also generated and advertised in `doc/client.md`, but
-> do not build on it: as generated its two arguments are swapped —
-> `validateAndMap(jsonConfig, configurationObject)` puts the raw JSON string in the *value* slot and the
-> already-parsed object where the **schema** belongs (the correct call, a few lines down in the same file,
-> is `validateAndMap(config, configurationSchema)`), so it throws for every input, valid or not. Parse the
-> JSON yourself and pass the object to `new Client({...})`.
+> do not build on it: it throws for every input, valid or not. Parse the JSON yourself and pass the
+> object to `new Client({...})`.
 
 ## Accessing controllers — you instantiate them
 
@@ -116,7 +111,7 @@ Unlike some SDKs, the `Client` exposes **no controller accessor methods**. You c
 yourself, passing the client, then call operations on it (see **typescript-calling-endpoints**):
 
 ```ts
-import { {Controller} } from '@paypal/paypal-server-sdk';
+import { {Controller} } from 'paypal-server-sdklib';
 
 const controller = new {Controller}(client);
 const response = await controller.{operation}(/* params */);
@@ -157,13 +152,6 @@ const controller = new {Controller}(apiClient);
 To produce a variant with a few options changed (e.g. attach a fetched OAuth token), call
 `client.withConfiguration({ ... })` — it returns a **new** `Client` merged over the current config rather
 than mutating the original.
-
-## Dependency injection
-
-TypeScript/Node has no single DI standard. Export the constructed client as a module singleton (above), or
-provide it through your DI container of choice (NestJS provider, InversifyJS binding, a factory function)
-with a single provider that constructs the client once. Inject the `Client` (or a narrow interface of your
-own over the controllers you use) rather than constructing inside consumers.
 
 ## Next
 

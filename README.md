@@ -17,23 +17,39 @@ One skill set per language. The entry point is that language's getting-started s
 
 ## Install
 
-This plugin was **generated for you, not published to a shared plugin marketplace** — so you install it from a local path rather than by name. Point your coding agent at the directory holding this plugin, then install it:
+The plugin is published as a **Claude Code plugin marketplace** at
+[`MuHamza30/paypal-api-plugin`](https://github.com/MuHamza30/paypal-api-plugin). In Claude Code:
 
 ```
-/plugin marketplace add <path to the directory containing this plugin>
-/plugin install paypal-api
+/plugin marketplace add MuHamza30/paypal-api-plugin
+/plugin install paypal-api@paypal-api-plugin
 ```
 
-In Codex the same two steps are CLI commands:
+Restart Claude Code (or run `/plugin`) and the 48 skills become available.
+
+### Other agents
+
+Codex, from the CLI:
 
 ```
-codex plugin marketplace add <path to the directory containing this plugin>
-codex plugin add paypal-api@<marketplace>
+codex plugin marketplace add https://github.com/MuHamza30/paypal-api-plugin
+codex plugin add paypal-api@paypal-api-plugin
 ```
 
-`<marketplace>` is the name the directory you just added registers under — `codex plugin marketplace list` prints it.
+Cursor and anything else that reads a local plugin directory: clone the repo and point the
+agent at the clone.
 
-Once your team publishes it to a plugin marketplace, add that marketplace in place of the local path and install `paypal-api` from it by name.
+```
+git clone https://github.com/MuHamza30/paypal-api-plugin.git
+```
 
-Then ask a usage question (e.g. *"how do I authenticate this SDK with an API key?"*) to trigger the relevant skill.
+### Updating
 
+```
+/plugin marketplace update paypal-api-plugin
+```
+
+## Usage
+
+Ask a usage question (e.g. *"how do I authenticate this SDK with an API key?"*) and the relevant
+skill loads automatically, or invoke one by name — `/paypal-api:python-getting-started`.

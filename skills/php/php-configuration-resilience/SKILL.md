@@ -1,6 +1,6 @@
 ---
 name: 'php-configuration-resilience'
-description: 'Tune an APIMatic-generated PHP SDK client — retries are off until you call `enableRetries(true)`, raise `numberOfRetries` AND give `maximumRetryWaitTime` a budget large enough to cover the backoff waits, only the HTTP methods in the generated `HTTP_METHODS_TO_RETRY` are ever retried, `timeout` is in seconds and applies per attempt, the base URL comes only from `Environment` constants (there is no free-form URL option), there is no auto-pagination so list endpoints are paged by hand, and logging is built into this SDK but stays off until you hand `loggingConfiguration(…)` a builder. Use whenever adjusting retry policy, timeouts, proxying, paging or logging on the PayPal Server SDK PHP SDK — load it even after reading the builder setters in the source, since the setter names don''t reveal that retries are disabled by default, that the retried methods and status codes are baked in at generation time, or that paging is entirely manual.'
+description: 'Tune the PayPal Server SDK PHP SDK client — retries, timeouts, proxy, logging and the base URL. Load before changing any transport setting. The setter list won''t tell you retrying takes three switches rather than one, that `maximumRetryWaitTime` is a cumulative budget rather than a cap, or that pagination is entirely manual here.'
 ---
 
 # Configuration & resilience for an APIMatic PHP SDK
@@ -18,16 +18,16 @@ $client = {Client}Builder::init()
     ->build();
 ```
 
-> The `maximumRetryWaitTime` line is not optional. `MAXIMUM_RETRY_WAIT_TIME` comes from the `BackoffMax`
-> code-generation setting and defaults to `0`, and a budget of `0` fits no backoff interval, so
+> The `maximumRetryWaitTime` line is not optional. `MAXIMUM_RETRY_WAIT_TIME` is generated per SDK and is
+> commonly `0`, and a budget of `0` fits no backoff interval, so
 > `enableRetries(true)` plus `numberOfRetries(3)` without it retries **nothing**. Check the constant in
 > `src/ConfigurationDefaults.php`.
 
 ## Read the real defaults — they are generated, not universal
 
 `src/ConfigurationDefaults.php` holds a `public const` for every option. **Those constants are this
-SDK's defaults**; they are fixed when the SDK is generated from the API's code-generation settings, so
-they differ between SDKs. Read them rather than assuming:
+SDK's defaults**; they are fixed when the SDK is generated, so they differ from SDK to SDK. Read them
+rather than assuming:
 
 `TIMEOUT`, `ENABLE_RETRIES`, `NUMBER_OF_RETRIES`, `RETRY_INTERVAL`, `BACK_OFF_FACTOR`,
 `MAXIMUM_RETRY_WAIT_TIME`, `RETRY_ON_TIMEOUT`, `HTTP_STATUS_CODES_TO_RETRY`, `HTTP_METHODS_TO_RETRY`,
@@ -57,16 +57,15 @@ Those eight setters are the complete retry surface. Things the names do not tell
 
 - **Three switches, not one.** `enableRetries(true)` alone does nothing if `NUMBER_OF_RETRIES` was
   generated as `0`; a non-zero `numberOfRetries` does nothing while retries are disabled; and **both** do
-  nothing while `maximumRetryWaitTime` is too small. `ENABLE_RETRIES` is always generated as `false`, and
-  `NUMBER_OF_RETRIES` (the `Retries` setting) and `MAXIMUM_RETRY_WAIT_TIME` (the `BackoffMax` setting)
-  both default to `0`, so expect to set all three by hand. Check all three constants in
+  nothing while `maximumRetryWaitTime` is too small. `NUMBER_OF_RETRIES` and `MAXIMUM_RETRY_WAIT_TIME`
+  are both commonly `0` as well, so expect to set all three by hand. Check all three constants in
   `ConfigurationDefaults`.
 - **`maximumRetryWaitTime` is a cumulative budget, not a cap.** The HTTP client computes the next wait as
   `RETRY_INTERVAL * BACK_OFF_FACTOR^attempt` plus up to ~0.1 s of jitter, and schedules the retry only
   while that wait still fits the remaining budget. So the value must be at least the **sum** of the waits
   you want — `RETRY_INTERVAL * (BACK_OFF_FACTOR^0 + … + BACK_OFF_FACTOR^(NUMBER_OF_RETRIES-1))` plus the
   jitter — and anything below the first interval yields **zero** retries however the other two are set.
-  `MAXIMUM_RETRY_WAIT_TIME` comes from the API's code-generation settings, so read the constant rather
+  `MAXIMUM_RETRY_WAIT_TIME` is generated per SDK, so read the constant rather
   than assuming a generous default.
 - **Only the methods in `httpMethodsToRetry` retry.** The generated set is typically the idempotent ones,
   so `POST`, `PATCH` and `DELETE` failures usually surface with no second attempt. Add one only if that
@@ -76,13 +75,10 @@ Those eight setters are the complete retry surface. Things the names do not tell
   not the attempts. There is no per-call cancellation mechanism.
 - `retryOnTimeout` decides whether a timed-out attempt counts as retryable at all, independently of the
   status-code list.
-- **Retries are off in every generated PHP SDK, whatever the other knobs say.** `ENABLE_RETRIES` is
-  generated `false` **always** — it is hardcoded in the generator, not derived from any setting — and
-  it is the flag the client actually reads before retrying anything. So an SDK can ship
-  `NUMBER_OF_RETRIES = 3` from the `Retries` code-generation setting and still retry nothing.
-  `numberOfRetries(0)` is therefore the wrong lever, and there is nothing to disable. To switch retries
-  on you need all three: `enableRetries(true)`, a non-zero `numberOfRetries`, and a
-  `maximumRetryWaitTime` large enough to hold the backoff waits. Do that only where nothing above the
+- **Retries are off in every generated PHP SDK, whatever the other knobs say.** `ENABLE_RETRIES` is the
+  flag the client reads before retrying anything, so an SDK can ship `NUMBER_OF_RETRIES = 3` and still
+  retry nothing; `numberOfRetries(0)` is the wrong lever, and there is nothing to disable. Switch them
+  on with all three switches above, and only where nothing above the
   SDK already retries — a queue worker, a job runner, a failover wrapper, or your own orchestration
   loop. Retry layers multiply rather than add: three retries is **four** requests per attempt, so
   inside a 3-attempt job it is twelve requests against an API whose rate limit counts every one.
@@ -92,17 +88,60 @@ Those eight setters are the complete retry surface. Things the names do not tell
 `timeout(int $seconds)` — **seconds**, not milliseconds. It is the only timeout knob; connect and read
 timeouts are not separately configurable.
 
+> ### ⚠ Read `TIMEOUT` before you assume there is one — `0` means *no* timeout
+>
+> `ConfigurationDefaults::TIMEOUT` is generated per SDK, so it
+> varies between SDKs and **`0` is what an SDK built without a timeout carries**. That value is not "use a sensible
+> default": it reaches cURL as `CURLOPT_TIMEOUT`, where `0` means *never time out*. A client built
+> without calling `timeout(...)` on such an SDK waits indefinitely on a provider that accepts the
+> connection and then stops responding.
+>
+> Open `src/ConfigurationDefaults.php` and read the constant. If it is `0`, **set `timeout(...)`
+> explicitly on every client you construct** — the same way you would `enableRetries(...)`. This is the
+> more dangerous of the two defaults: an SDK that does not retry fails fast and visibly, while one with
+> no timeout hangs.
+
+> **A call that fetches a token spends `timeout` twice.** This applies to an SDK secured by an OAuth
+> grant — check `src/Authentication/` for an OAuth manager; if there is none, skip this.
+>
+> An operation whose cached token is missing or expired fetches one first, as a **separate request** on
+> the same client and the same `timeout` — which, per the warning above, may be no bound at all when
+> `ConfigurationDefaults::TIMEOUT` is `0`. `timeout` is per request, so the operation can take up to
+> **two** full periods; size any caller-side deadline against two, not one, and note there is no
+> per-call override to shorten either of them.
+>
+> **A token-fetch failure reaches you disguised as bad credentials.** The manager swallows the error and
+> hands back the token it already held (`null` on a first call), so a token endpoint that times out,
+> refuses the connection or returns a `500` produces the same `'Client is not authorized...'`
+> `InvalidArgumentException` a wrong client id does. Call `fetchToken()` yourself at startup, where the
+> real exception is still in flight, or configure a token provider.
+>
+> **The provider is not on the client builder.** It is `oAuthTokenProvider(callable)` on the scheme's
+> *credentials* builder in `src/Authentication/` — the file whose name ends `CredentialsBuilder`.
+
 ## Base URL and environment
 
 There is **no free-form base-URL option.** The URL comes from the `Environment::` constant you select,
 looked up in a private map inside `src/{Client}.php`. Read `src/Environment.php` for the real constant
-names — they come from the spec's server list and a `PRODUCTION` may not exist.
+names — a `PRODUCTION` may not exist.
 
 Some APIs declare server parameters (a templated host segment, a port); those become their own builder
 setters. Check `src/{Client}Builder.php`. Confirm what you actually got with `$client->getBaseUri()`.
 
-If no environment points where you need — a local mock, a proxy — you cannot redirect the SDK by
-configuration. See **php-testing** for what to do instead.
+If no environment points where you need — a local mock, a gateway, a recording proxy — **the generated
+builder cannot get you there.** `src/{Client}Builder.php` exposes no HTTP-client injection point and no
+URL setter, so there is nothing on it to turn. **php-testing** says the same from the testing side.
+
+**The core client underneath it can, at a price.** `apimatic/core`'s `ClientBuilder` is public API and
+takes both an HTTP client and `serverUrls(...)`, and the generated base controller's constructor is
+public — so the base URL *is* reachable by assembling the core client yourself. But then you own
+everything the generated builder was configuring: auth managers, the user agent, global errors, the
+retry and timeout configuration. Whatever you do not wire up is simply absent, and the omission does not
+announce itself. It is also a construction path the generated code does not take, so a regeneration can
+move it under you.
+
+So: `proxyConfiguration(...)` or DNS first. Assemble the core client yourself only when neither
+reaches — it works, and it is a larger commitment than it looks.
 
 ## Proxy
 
@@ -159,7 +198,7 @@ the response model in `src/Models/` for whatever "there is more" field the API a
 short page is a heuristic, not a contract.
 
 ## Logging
-**This SDK was generated with `EnableLogging`**, so `src/Logging/LoggingConfigurationBuilder.php` exists
+**This SDK has logging built in**: `src/Logging/LoggingConfigurationBuilder.php` exists
 and the client builder has a `loggingConfiguration(…)` setter. Nothing is logged until you call it:
 
 ```php
@@ -198,21 +237,8 @@ $client = {Client}Builder::init()
 - Both request and response configurations also take `includeHeaders(...)`, `excludeHeaders(...)` and
   `unmaskHeaders(...)` as variadic header-name lists.
 
-### Verify on the wire, on the first run of any new integration
-
-A wrong environment, an unsubstituted path placeholder or a mis-serialized parameter parses fine and
-produces no in-band signal — the only symptom is a runtime `404` or `422`. Turn
-body+header logging on for the first execution and check:
-
-1. the **method** matches the operation;
-2. the **path** has no literal placeholder left in it;
-3. each path segment is the value the API expects;
-4. the query parameters you set actually appear.
-
-Then turn it back down.
-
 ## Other conditional options
 
-`skipSslVerification(bool)`, `additionalHeaders(array)` and `userAgentDetail(string)` are generated only
-when the corresponding generator option was on. Their absence from `src/{Client}Builder.php` means the
+`skipSslVerification(bool)`, `additionalHeaders(array)` and `userAgentDetail(string)` are each generated
+only in an SDK built with them. Their absence from `src/{Client}Builder.php` means this
 SDK does not support them — do not work around it by editing the SDK.

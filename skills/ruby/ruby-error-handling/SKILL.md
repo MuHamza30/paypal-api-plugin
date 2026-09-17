@@ -1,12 +1,9 @@
 ---
 name: 'ruby-error-handling'
-description: 'Handle errors from an APIMatic-generated Ruby SDK — an error response raises. The classes involved are `APIException` and the typed subclasses under `exceptions/`, whose attributes are unboxed from the response body, and Faraday transport failures never surface as `APIException`. Use the moment you write a begin/rescue around a call on the PayPal Server SDK Ruby SDK, translate its errors into your own, or need a status code — load it even after reading the raised class in the source, since the class name alone won''t tell you the rescue order that keeps a typed handler reachable, or where the status code actually lives.'
+description: 'Handle errors from the PayPal Server SDK Ruby SDK. Load before your first `rescue` around a call, or when building an error-translation layer. The class list won''t tell you which statuses this SDK actually raises on, where the error body''s fields live, or that the `doc/` Errors table names classes that may not exist here.'
 ---
 
 # Error handling for an APIMatic Ruby SDK
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{operation}`,
-> `{controller_name}`, `{OperationException}`) — replace it with the concrete identifier from the source.
 
 Endpoint methods **raise** on error responses. Everything they raise descends from
 `PaypalServerSdk::APIException`, which extends `CoreLibrary::ApiException` from the `apimatic_core` gem —
@@ -18,8 +15,8 @@ so a single `rescue PaypalServerSdk::APIException` is a complete safety net for 
 
 Two shapes, and the difference is generated per operation:
 
-- **Typed subclass** — when the spec documents an error model for a status code, the generator emits a
-  class under `lib/paypal_server_sdk/exceptions/` (`class {OperationException} < APIException`) and the
+- **Typed subclass** — where a status code has an error model, there is a class under
+  `lib/paypal_server_sdk/exceptions/` (`class {OperationException} < APIException`) and the
   operation registers it for that status. The instance carries the error body's fields as ordinary
   attributes.
 - **Base `APIException`** — everything else. This is the common case: many operations document no error
@@ -28,22 +25,21 @@ Two shapes, and the difference is generated per operation:
 You do not have to guess. Two places tell you:
 
 1. **`doc/controllers/{controller}.md`** — each operation has an **Errors table** mapping HTTP status
-   code → description → exception class. Read it first — but it is generated from the spec rather than
-   from the SDK's own registrations, so **confirm each class it names actually exists** under
-   `lib/paypal_server_sdk/exceptions/` before you rescue it.
+   code → description → exception class. Read it first, then confirm each class against
+   `ls lib/paypal_server_sdk/exceptions/`.
 2. The operation in the controller folder under `lib/paypal_server_sdk/` — where this build registers
    errors at all (the callout below settles that), its response handler holds a
    `.local_error('{status}', '{message}', {ExceptionClass})` line per documented error, and a
    `GLOBAL_ERRORS` constant on the controller base class supplies the catch-all. The folder
-   (`controllers/`, `apis/`, …) is named from the SDK's controller-namespace setting and the base class
-   (`BaseController`, `BaseApi`, …) from its `ControllerPostfix` setting, so
+   (`controllers/`, `apis/`, …) and the base class (`BaseController`, `BaseApi`, …) are both named per
+   SDK, the latter after its controller postfix, so
    `grep -rn GLOBAL_ERRORS lib/paypal_server_sdk/` for the real constant rather than assuming either name.
 
-> **Both halves of that registration exist because this SDK was generated to raise for HTTP error
-> statuses.** The client wires the `GLOBAL_ERRORS` constant into its global configuration — the
+> **Both halves of that registration exist because this SDK raises for HTTP error statuses.** The client
+> wires the `GLOBAL_ERRORS` constant into its global configuration — the
 > `'default'` entry is what turns *any* unsuccessful response into `APIException` — and each response
-> handler carries its own `.local_error(...)` lines for the statuses the spec documents. **One setting
-> gates both**, so they are present or absent together: there is no build in which only the declared
+> handler carries its own `.local_error(...)` lines for the statuses the API documents. **The two stand or
+> fall together**, so they are present or absent as a pair: there is no build in which only the declared
 > statuses raise. `grep -rn global_errors lib/paypal_server_sdk/client.rb` shows the wiring.
 
 ## Rescue the exception

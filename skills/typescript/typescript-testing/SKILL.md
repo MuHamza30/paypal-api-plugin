@@ -1,6 +1,6 @@
 ---
 name: 'typescript-testing'
-description: 'Unit-test code that calls the APIMatic-generated TypeScript/Node.js PayPal Server SDK SDK — the transport is an axios adapter, so the in-process seam is a stub adapter passed via `unstable_httpClientOptions`, with `nock`/`msw` as the HTTP-level alternative; covers stubbing success and error responses, asserting the outgoing request, asserting the right error class per operation, and registering a stub client in a DI container. Use when writing, mocking, or stubbing tests for calls made through the PayPal Server SDK TypeScript SDK — load it even after reading the constructor in the source, since the config alone won''t tell you which property is the seam, or that retries must be disabled so a stubbed 5xx fails fast.'
+description: 'Unit-test code that calls the PayPal Server SDK TypeScript SDK. Load before stubbing the SDK. The type won''t tell you the seam is a stub adapter passed through `unstable_httpClientOptions`, that the SDK ships no mocking helpers, or that a stubbed 5xx needs the retry config zeroed to fail on the first attempt.'
 ---
 
 # Testing code that uses an APIMatic TypeScript SDK
@@ -14,24 +14,19 @@ a stub **axios adapter** there is the in-process seam: no network, no global pat
 > versions. If you would rather not depend on it, stub at the HTTP layer with `nock` (Node) or `msw`
 > instead — the assertions below apply either way.
 
-**Match the project's existing test stack — don't impose one.** Check the test project's `package.json`
-and existing tests, then mirror both its **test framework** (Jest / Vitest / Mocha) and its **assertion
-style**. The samples below use Jest `test` + `expect` **purely for reference** — they show the seam and
-*what* to assert, not a mandated framework.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{apiGroup}`,
-> `{operation}`) — replace it with the concrete identifier from the source.
+The samples below use Jest `test` + `expect` for reference only — mirror whatever the project already
+uses.
 
 ## A reusable stub helper
 
 ```typescript
-import { Client } from '@paypal/paypal-server-sdk';
+import { Client } from 'paypal-server-sdklib';
 
 function clientReturning(status: number, body: unknown): {
   client: Client;
-  lastRequest: () => any | undefined;
+  requests: () => any[];
 } {
-  let captured: any;
+  const requests: any[] = [];
 
   const client = new Client({
     // Dummy credentials for whatever scheme the operation requires. Auth is applied BEFORE the
@@ -42,7 +37,7 @@ function clientReturning(status: number, body: unknown): {
     unstable_httpClientOptions: {
       // An axios adapter: receives the request config, returns an axios response.
       adapter: async (config: any) => {
-        captured = config;
+        requests.push(config);
         return {
           // The SDK disables axios response transformation (`transformResponse: []`), so the
           // adapter must hand back the raw serialized body exactly as the wire would — a string.
@@ -59,13 +54,70 @@ function clientReturning(status: number, body: unknown): {
     },
   });
 
-  return { client, lastRequest: () => captured };
+  return { client, requests: () => requests };
 }
 ```
 
-If the operation needs **no** auth, drop the credentials line. If it needs OAuth, prefer stubbing an
-API-key or basic scheme it also accepts — an OAuth stub sends a token-fetch call through the same
-adapter and skews invocation counts.
+**Capture every intercepted call, not just the last one.** A single overwritten variable
+(`captured = config`) points every assertion at whichever request fired **last**, which is not
+necessarily the one the test is about: an operation whose scheme fetches a token sends that token
+request through this same adapter first, and on a call that fails during auth the last — and only —
+request captured is the token one. Keep a list, as above, and select by URL.
+
+If the operation needs **no** auth, drop the credentials line. If it needs OAuth and the API also
+declares a non-OAuth scheme, prefer stubbing that one — an OAuth stub adds a token-fetch call through
+the same adapter, so the adapter is invoked once more than the operation itself accounts for.
+
+**Where an OAuth grant is the only scheme the API declares, there is no other scheme to substitute, and
+an unhandled token fetch fails the call before the operation is reached** — reporting a
+schema-validation failure that names the *token* type and never mentions your stub. Two routes out, and
+the first is usually the one you want:
+
+**Seed a token so no fetch happens.** The manager fetches only when the cached token is missing or past
+its `expiry`, so a credentials object carrying an unexpired one never reaches the network. Nothing but
+the operation then arrives at your adapter, which keeps invocation counts equal to the calls your test
+actually makes:
+
+```typescript
+{oAuthProperty}: {
+  oAuthClientId: 'dummy-id',
+  oAuthClientSecret: 'dummy-secret',
+  oAuthToken: {
+    accessToken: 'seeded-token',
+    tokenType: 'Bearer',
+    expiry: BigInt(Math.floor(Date.now() / 1000) + 3600),
+  },
+},
+```
+
+Read the token type's own members off `src/models/` — which are required, and whether `expiry` is the
+field this build compares against — rather than copying the shape above wholesale.
+
+**Or answer the token request from the adapter**, which is what you want when the exchange itself is
+under test, or when you would rather not depend on how expiry is decided. Branch on the request URL,
+taking the real token path from the generated OAuth authorization controller's `createRequest(...)` call
+under `src/controllers/` rather than guessing it — it is the spec's token URL and differs between
+APIs — and answer that one path with a token payload instead of the body under test:
+
+```typescript
+adapter: async (config: any) => {
+  requests.push(config);
+  if (config.url.includes('{tokenPath}')) {      // the real path, read from the controller
+    return {
+      data: JSON.stringify({ access_token: 'stub-token', token_type: 'Bearer', expires_in: 3600 }),
+      status: 200, statusText: '', headers: { 'content-type': 'application/json' }, config,
+    };
+  }
+  return {
+    data: typeof body === 'string' ? body : JSON.stringify(body),
+    status, statusText: '', headers: { 'content-type': 'application/json' }, config,
+  };
+},
+```
+
+The required members are the ones the token model declares non-optional — read them off its interface
+under `src/models/`, where the schema beside it also gives their wire spellings. Omitting one fails the
+token response's own deserialization, so the operation is never reached.
 
 ## Test a success path
 
@@ -86,9 +138,8 @@ on `response`.
 
 `/* args — see the signature */` stands for the operation's arguments in the form it was generated in:
 positional parameters, or a **single options object** bundling them by name when the operation has more
-than one parameter and the build sets `CollapseParamsToArray`. Copy the shape from the method in
-`src/controllers/` (that folder is named by the `ControllerNamespace` generator setting, so confirm the
-name in your own `src/`) — a call written in the wrong form does not compile, so the test never runs.
+than one parameter and this build collapses them. Copy the shape from the method in
+`src/controllers/` — a call written in the wrong form does not compile, so the test never runs.
 
 ## Test an error path
 
@@ -111,7 +162,7 @@ operation — to get the class for the status code you are stubbing.
 ```typescript
 // Typed error classes are re-exported from the package root; `.` and `./metadata`
 // are the only exported subpaths, so there is no `/errors` import path.
-import { {ErrorResponse}Error } from '@paypal/paypal-server-sdk';
+import { {ErrorResponse}Error } from 'paypal-server-sdklib';
 
 test('throws typed error on API error', async () => {
   const { client } = clientReturning(422, { errors: ['bad input'] });
@@ -126,7 +177,7 @@ test('throws typed error on API error', async () => {
 **Case B — base `ApiError`:**
 
 ```typescript
-import { ApiError } from '@paypal/paypal-server-sdk';
+import { ApiError } from 'paypal-server-sdklib';
 
 test('throws ApiError on non-2xx', async () => {
   const { client } = clientReturning(422, { errors: ['bad input'] });
@@ -151,12 +202,14 @@ The stub captures the **axios request config**, so you can assert method, URL, h
 
 ```typescript
 test('sends correct request', async () => {
-  const { client, lastRequest } = clientReturning(200, {});
+  const { client, requests } = clientReturning(200, {});
   const api = new {Controller}(client);
 
   await api.{operation}(/* args — see the signature */);
 
-  const req = lastRequest()!;
+  // Select the request under test by path: a scheme that fetches a token puts its own
+  // request in this list first.
+  const req = requests().find((r) => r.url.includes('/expected/path'))!;
   expect(req.method.toUpperCase()).toBe('POST');
   expect(req.url).toContain('/expected/path');
 
@@ -170,21 +223,16 @@ test('sends correct request', async () => {
 ```
 
 Field names here are axios's (`method`, `url`, `data`, `headers`), not the WHATWG `Request` shape, and
-`req.method` arrives lower-case — log the captured config once if you are unsure what a given operation
-produces.
+`req.method` arrives lower-case — log the captured requests once if you are unsure what a given
+operation produces.
 
 ## Notes
 
 - **Disable retries in tests** (`httpClientOptions.retryConfig.maxNumberOfRetries: 0`) so a stubbed
   `5xx` fails on the first attempt instead of waiting out the backoff.
-- To test that retries *do* fire, have the stub return `503` then `200` and count adapter invocations —
-  but you must set **both** `maxNumberOfRetries` **and** a non-zero `maximumRetryWaitTime`, plus a small
-  `retryInterval` to keep the test fast:
-  `retryConfig: { maxNumberOfRetries: 2, retryInterval: 0.01, maximumRetryWaitTime: 60 }`.
-  `maximumRetryWaitTime` is the total retry-wait budget, and when the generated default is `0` **no
-  retry ever fires**, whatever `maxNumberOfRetries` says — you would wrongly conclude the method is
-  outside the retry set. Which methods retry is baked in at generation time; check
-  `DEFAULT_RETRY_CONFIG.httpMethodsToRetry` in `src/defaultConfiguration.ts` for the verb under test.
+- To test that retries *do* fire, have the stub return `503` then `200` and count adapter invocations,
+  with `retryConfig: { maxNumberOfRetries: 2, retryInterval: 0.01, maximumRetryWaitTime: 60 }` — both
+  fields have to be non-zero, and **typescript-configuration-resilience** says why.
 - Controllers are constructed from the client (`new {Controller}(client)`), so the stubbed client is the
   only transport you fake — but it must still carry credentials for the scheme the operation requires
   (see the helper above), since auth is applied before the request reaches your adapter.

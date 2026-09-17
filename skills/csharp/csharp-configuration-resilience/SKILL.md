@@ -1,13 +1,9 @@
 ---
 name: 'csharp-configuration-resilience'
-description: 'Tune an APIMatic-generated C# SDK client — every transport setting goes through the `.HttpClientConfig(config => ...)` action on the client `Builder`, so there is no client-level `Timeout(...)` method; the generated `HttpClientConfiguration` sets no retry or timeout default of its own, so retry counts, statuses and verbs must be read off `client.HttpClientConfiguration`, not assumed; plus `TimeSpan` timeouts, per-call `CancellationToken`, proxying, your own `HttpClient`, `Environment`-based URL selection with no free-form base URL, and the optional `LoggingConfig`. Use whenever adjusting retries, timeouts, proxying or the environment on the PayPal Server SDK C# SDK — load it even after reading the builder in the source, since the method list won''t tell you that the defaults live in the runtime package, that `Timeout` bounds one attempt rather than the call, or that `ToBuilder()` drops the HTTP configuration.'
+description: 'Tune the PayPal Server SDK C# SDK client — retries, timeouts, proxy, transport, logging and the base URL. Load before changing any transport setting. The option list won''t tell you nothing retries until you raise the count yourself, that the verb whitelist does not cover a call that fails by throwing, or how to reach a host no `Environment` member covers.'
 ---
 
 # Configuration & resilience for an APIMatic C# SDK
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Member}`
-> for an `Environment` member, `{Controller}`, `{Operation}`) — replace it with the concrete
-> identifier from the source.
 
 Everything is configured on the client `Builder` at construction (see
 **csharp-client-initialization**). Transport tuning is **nested inside the `HttpClientConfig`
@@ -35,7 +31,7 @@ Those values are **a policy you are choosing**, not this SDK's defaults. There i
 | `NumberOfRetries(int)` | count | times a request is retried |
 | `BackoffFactor(int)` | multiplier | exponential backoff between retry calls |
 | `RetryInterval(double)` | `double` | interval between the endpoint calls |
-| `MaximumRetryWaitTime(TimeSpan)` | `TimeSpan` | **not only a cap on retry waiting** — it sizes a timeout policy that wraps the *whole* call, retries included, and breaching it throws `Polly.Timeout.TimeoutRejectedException`. That is **not** an `OperationCanceledException`, so a `catch` written for cancellation does not see it (see **csharp-error-handling**). Left unset it is infinite |
+| `MaximumRetryWaitTime(TimeSpan)` | `TimeSpan` | cap on the whole retried call, not just the waiting |
 | `StatusCodesToRetry(IList<int>)` | statuses | which statuses invoke a retry |
 | `RequestMethodsToRetry(IList<HttpMethod>)` | `System.Net.Http.HttpMethod` | which verbs invoke a retry |
 | `HttpClientInstance(HttpClient, bool overrideHttpClientConfiguration = true)` | | use your own client — the getter is **never `null`**, since the runtime materialises one when you inject nothing, so assert identity (`NotSame`) rather than nullness when checking whether yours survived |
@@ -48,28 +44,25 @@ every row above **except `Proxy`**, plus `OverrideHttpClientConfiguration`.
 
 `Http/Client/HttpClientConfiguration.cs` sets **no retry, timeout or status-code default of its own**:
 its `Builder` wraps `CoreHttpClientConfiguration.Builder` and every setter forwards, so every
-effective default comes from the `APIMatic.Core` package, whose version the `.csproj` floats.
+effective default comes from the `APIMatic.Core` package, whose version the `.csproj` floats. That
+default is `NumberOfRetries = 0`, so no verb is retried — `GET` and `PUT` included — until you raise the
+count yourself.
 
-> Do not assume a default, and do not carry one over from another SDK. There is no named default
-> constant in `HttpClientConfiguration.cs`. Build a client the way production builds it, then read
-> `NumberOfRetries`, `StatusCodesToRetry` and `RequestMethodsToRetry` off it individually — its
-> `ToString()` prints unlabelled positional values and renders collections as their type name, so it is
-> not usable for this. That is the only authoritative answer for this build.
-
-- **Nothing is retried out of the box.** The effective default is `NumberOfRetries = 0`, so no verb is
-  retried — `GET` and `PUT` included — until you raise the count yourself.
+> Do not assume a default, and do not carry one over from another SDK. Build a client the way production
+> builds it, then read `NumberOfRetries`, `StatusCodesToRetry` and `RequestMethodsToRetry` off it
+> individually — its `ToString()` prints unlabelled positional values and renders collections as their
+> type name, so it is not usable for this.
 
 > ### ⚠ `RequestMethodsToRetry` does not protect a `POST`
 >
 > **The verb whitelist gates only the *response*-triggered arm of the retry policy. A call that fails by
-> throwing is retried whatever its verb.** The runtime builds one policy as
-> `Policy.HandleResult(ShouldRetry).Or<TaskCanceledException>().Or<HttpRequestException>()`, and only
-> `ShouldRetry` consults `RequestMethodsToRetry`. The two `.Or<...>` arms do not.
+> throwing is retried whatever its verb.** The runtime's policy has one arm that consults
+> `RequestMethodsToRetry` and two — a cancelled task, and a failed HTTP request — that do not.
 >
-> So with `NumberOfRetries(2)` and a whitelist of `GET` alone, a create `POST` that times out or drops
+> So with `NumberOfRetries(2)` and a whitelist of `GET` alone, a creating `POST` that times out or drops
 > its connection **is sent again** — which is the duplicate-write hazard, arriving through the one door
-> the whitelist looks like it closes. Observed: a single create call produced two `POST`s at the
-> provider, and only the provider's idempotency key stopped it becoming two records.
+> the whitelist looks like it closes. Whether that becomes two records depends on whether the operation
+> is idempotent server-side, which is a property of the API you are calling.
 >
 > A raised `NumberOfRetries` is therefore a decision about **every** verb the client sends, not just the
 > whitelisted ones. If some operations must never be re-sent, the whitelist will not express that —
@@ -81,22 +74,22 @@ effective default comes from the `APIMatic.Core` package, whose version the `.cs
   until you add it — subject to the exception arm above, which ignores the list entirely.
   **Check what your SDK's surface actually is before tuning retries at all** —
   `grep -rhoE 'Setup\(HttpMethod\.[A-Za-z]+|Setup\(new HttpMethod\("[A-Z]+"' Controllers/ | sort | uniq -c`
-  (the folder name is a generator setting, so take it from the token rather than assuming) — and match
+  (the folder name varies per SDK, so take it from the token rather than assuming) — and match
   **both** forms, because verbs with no `HttpMethod` static (`PATCH` among them) are emitted as
   `new HttpMethod("PATCH")` and a census that looks only for `HttpMethod.` silently under-reports them.
   On a write-heavy API almost every operation can be `POST`, and raising `NumberOfRetries` alone then
   changes nothing.
 - **`Timeout` bounds one attempt** — it is the underlying `HttpClient`'s timeout, so a retried call
   can run for a multiple of it. `MaximumRetryWaitTime` is the ceiling on the whole retried sequence;
-  size a caller-side deadline from that. Retries happen inside the SDK, before any exception reaches
+  size a caller-side deadline from that. **Breaching it does not raise a cancellation exception** —
+  what surfaces is a Polly timeout type, so a `catch` written for `OperationCanceledException` will not
+  see it (see **csharp-error-handling**). Retries happen inside the SDK, before any exception reaches
   your `catch` — see **csharp-error-handling**.
 - Operation XML doc comments sometimes assert retry behaviour ("GET is idempotent, so the SDK retries
   it by default on 408, 429 and 5xx"). **That prose is copied from the spec's description**, and the
   `*Default*:` notes in `doc/client.md` are documentation too. Neither is evidence of this build.
-- **The build does not choose the policy for you either.** The `Retries`, `StatusCodesToRetry` and
-  `RequestMethodsToRetry` code-generation settings are **not carried into the C# SDK**: no generated
-  file names a retry value, so SDKs built with different `Retries` values are identical here and the
-  runtime default applies to both. Whatever count you need, call `.NumberOfRetries(...)` yourself — and
+- **No generated file names a retry value**, so the count is left at the runtime's own default until
+  you call `.NumberOfRetries(...)` yourself — and
   only where nothing above the SDK already retries — a hosted service, a message consumer, a Polly
   policy, or your own orchestration loop. Retry layers multiply rather than add: three retries is
   **four** requests per attempt, so inside a 3-attempt job it is twelve requests against an API whose
@@ -110,6 +103,20 @@ effective default comes from the `APIMatic.Core` package, whose version the `.cs
 trailing `CancellationToken` that **only the `{Operation}Async` overloads take** — see
 **csharp-calling-endpoints** for the two method shapes and which one drops the token.
 
+> ### ⚠ Your `CancellationToken` does not reach a token exchange
+>
+> **This applies to a scheme that fetches a token** — an OAuth grant. If the auth setters listed in
+> **csharp-getting-started** show only static credentials, nothing below happens on your calls.
+>
+> An operation whose cached token is missing or expired fetches one **first**, as a separate HTTP
+> request, and the token you passed does not travel with it: the auth manager calls the OAuth
+> controller's token method without the trailing `CancellationToken`, so that request runs at
+> `CancellationToken.None`. Your token still governs the operation itself.
+>
+> **`Timeout` does bound it**, which is the saving grace — the token request goes out on the same
+> `HttpClient`. But `Timeout` is per request, so a call that has to fetch a token can take up to
+> **two full `Timeout` periods**. Size a caller-side deadline against two, not one, and do not expect
+> cancellation to shorten the first of them.
 ## Base URL / environment
 
 There is **no free-form base-URL option** — neither the client `Builder` nor
@@ -125,8 +132,39 @@ configuration variable can instead be a **global header sent on every request**,
 `string.Empty` ships blank rather than being omitted. Read the variable's registration in
 `PaypalServerSdkClient.cs` to see which it is — see **csharp-client-initialization** for choosing among them.
 
-To reach somewhere no environment covers — a local mock, a recording proxy — supply an `HttpClient`
-whose handler rewrites the URI (see **csharp-testing**), or route through a proxy.
+To reach somewhere no environment covers — a local mock, a recording proxy, a gateway — route through a
+proxy (below), or supply an `HttpClient` built over a **forwarding** `DelegatingHandler` that rewrites
+`request.RequestUri` and then calls `base.SendAsync`:
+
+```csharp
+internal sealed class BaseUrlRewriteHandler : DelegatingHandler
+{
+    private readonly Uri _target;
+    public BaseUrlRewriteHandler(Uri target, HttpMessageHandler inner) : base(inner) => _target = target;
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var b = new UriBuilder(request.RequestUri) { Scheme = _target.Scheme, Host = _target.Host, Port = _target.Port };
+        request.RequestUri = b.Uri;                      // path and query preserved
+        return base.SendAsync(request, cancellationToken);
+    }
+}
+```
+
+> **Do not reach for the stub handler in csharp-testing for this.** That one *answers* the request and
+> never forwards it, which is what you want in a test and the opposite of what you want here. The two
+> look alike and are not the same thing.
+
+Two properties of this seam are worth knowing before you rely on it:
+
+- **It sits below the SDK, so it catches every request the client makes — including the OAuth token
+  exchange.** That is usually what you want: rewriting only the API host would leave the client
+  authenticating against the original one. But it means a handler that filters by path has to account for
+  the token endpoint deliberately rather than by omission.
+- **Unlike replacing the transport wholesale, the SDK's own behaviour still runs.** Auth, the retry
+  policy, the timeout and error mapping are all applied above the handler, so redirecting this way does
+  not quietly opt you out of the rest of this skill.
 
 ## Proxy
 
@@ -168,12 +206,12 @@ over but starts a fresh `HttpClientConfiguration.Builder` — see **csharp-clien
 operation returns a `Pageable<,>`. A list endpoint here returns the ordinary type: drive its own
 page/cursor parameters yourself and stop on the API's end signal.
 
-> The "ordinary type" above is the `ApiResponse<T>` envelope: this SDK sets `ReturnCompleteHttpResponse`,
+> The "ordinary type" above is the `ApiResponse<T>` envelope this SDK returns,
 > so `Http/Response/ApiResponse.cs` is generated and every non-void, non-paginated operation returns it.
 
 ## Logging
 
-This SDK was generated with `EnableLogging`, so logging is built in — but it is **off until you ask for
+Logging is built into this SDK — but it is **off until you ask for
 it**: the builder's logging field starts `null`. `PaypalServerSdkClient.Builder` has a `LoggingConfig`
 method and there is a `Logging/` folder beside `Http/`. The no-argument overload switches on the
 built-in console logger; the action overload hands you a `LogBuilder`:
@@ -197,20 +235,6 @@ passed to `.HttpCallback(...)` already records the *last* exchange on its `Reque
 properties; subclass it and override the empty `OnBeforeRequest(HttpRequest)` /
 `OnAfterResponse(HttpResponse)` hooks to log *every* exchange. `doc/http-request.md` and
 `doc/http-response.md` list their members.
-
-### Verify on the wire (first run of any new integration)
-
-Turn logging on for the first execution of any new call and inspect the output. A wrong environment, a
-leftover `{placeholder}`, or a mis-serialized path segment **compiles cleanly** and produces no in-band
-signal; the only symptom is a runtime `404`/`422`.
-
-Checklist for the first logged request:
-1. the **verb** matches the operation;
-2. the **path** has no literal `{placeholder}` left unsubstituted;
-3. each **path-param segment** is the value the API expects;
-4. the query params you set actually appear in the query string.
-
-Turn it back down once verified.
 
 ## The same options from configuration
 

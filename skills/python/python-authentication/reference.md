@@ -1,6 +1,6 @@
 # Authentication reference (APIMatic Python)
 
-Full matrix of auth schemes the APIMatic Python generator supports. Every scheme **except custom
+Every auth scheme shape you can meet in one of these SDKs. Every scheme **except custom
 authentication** produces a handler class *and* a `{Scheme}Credentials` class in one module under
 `paypalserversdk/http/auth/`, and for those only the **credentials class and the client kwarg** concern
 you. Custom authentication generates the handler alone — no credentials class to build and no

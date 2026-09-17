@@ -2,51 +2,20 @@
 
 ## Model class shape
 
-```php
-class {Model} implements \JsonSerializable
-{
-    private ${requiredField};
-    private ${optionalField};
+A model is a `\JsonSerializable` class with private fields, a constructor taking the required ones,
+`get{Field}()`/`set{Field}()` pairs, `__toString()` (via `ApiHelper::stringify`) and
+`jsonSerialize(bool $asArrayWhenEmpty = false)`.
 
-    public function __construct({type} ${requiredField}) { … }
-
-    public function get{Field}(): {type} { … }
-
-    /**
-     * @required          // present only on required fields
-     * @maps {jsonName}   // the wire name
-     * @factory …         // the (de)serializer for enums / dates
-     * @mapsBy …          // the union template, for oneOf/anyOf fields
-     */
-    public function set{Field}({type} ${field}): void { … }
-
-    public function __toString(): string { … }        // via ApiHelper::stringify
-    public function jsonSerialize(bool $asArrayWhenEmpty = false) { … }
-}
-```
-
-The annotations are **load-bearing at runtime**: deserialization is driven by JsonMapper reading these
-docblocks. This is why `opcache.save_comments` must stay enabled — see **php-getting-started**.
+The docblock on each setter is **load-bearing at runtime**: deserialization is driven by JsonMapper
+reading `@required`, `@maps {jsonName}` (the wire name), `@factory` (the enum or date codec) and
+`@mapsBy` (the union template). This is why `opcache.save_comments` must stay enabled — see
+**php-getting-started**.
 
 ## Builder class shape
 
-```php
-class {Model}Builder
-{
-    private $instance;
-    private function __construct({Model} $instance) { … }
-
-    public static function init(/* required fields */): self { … }
-
-    public function {optionalField}($value): self { … }        // one per optional field
-    public function unset{Field}(): self { … }                 // optional-and-nullable fields only
-    public function additionalProperty(string $name, $value): self { … }   // when supported
-
-    public function build(): {Model} { … }                     // returns a clone
-}
-```
-
-Namespace: `PaypalServerSdkLib\Models\Builders`. Enums get **no** builder.
+`{Model}Builder` in `PaypalServerSdkLib\Models\Builders`: `init(...)` takes the required fields, one
+method per optional field, `unset{Field}()` for optional-and-nullable fields, `additionalProperty(string
+$name, $value)` where supported, and `build()` returning a clone. Enums get **no** builder.
 
 ## Enum class shape
 ```php
@@ -103,24 +72,10 @@ rather than `->type({Model}::class)`.
 
 ## Optional-and-nullable storage
 
-Such a field is stored as a one-key array box, which is what makes the three states representable:
-
-```php
-private $boss = [];                                  // absent
-
-public function getBoss(): ?Person
-{
-    if (count($this->boss) == 0) { return null; }    // absent -> null
-    return $this->boss['value'];                     // set (possibly to null)
-}
-
-public function setBoss(?Person $boss): void { $this->boss['value'] = $boss; }
-public function unsetBoss(): void { $this->boss = []; }
-```
-
-`jsonSerialize()` emits it under `if (!empty($this->boss))` — a plain-optional field uses
-`if (isset($this->field))` instead, which is why a plain-optional field can never carry an explicit
-`null`.
+Such a field is stored as a one-key array box, which is what makes the three states representable: the
+box is empty when the field is absent and holds one entry once set, possibly to `null`. `unset{Field}()`
+empties it again. A plain-optional field is stored as the value itself and serialized under
+`isset(...)`, which is why it can never carry an explicit `null`.
 
 ## Additional properties
 
@@ -128,7 +83,7 @@ On the model (generated only when the spec allows them):
 
 | Method | Behaviour |
 | --- | --- |
-| `addAdditionalProperty(string $name, $value)` | stores it. When the SDK was generated with `ExtendedAdditionalPropertiesSupport`, the model class carries a `protected $propertyNames` array and this first throws `\InvalidArgumentException` if `$name` collides with a declared property — whether the additional properties are typed or untyped (`mixed`). Look for `$propertyNames` on the model class, not for a typed `$value` parameter |
+| `addAdditionalProperty(string $name, $value)` | stores it. In an SDK with extended additional-properties support, the model class carries a `protected $propertyNames` array and this first throws `\InvalidArgumentException` if `$name` collides with a declared property — whether the additional properties are typed or untyped (`mixed`). Look for `$propertyNames` on the model class, not for a typed `$value` parameter |
 | `findAdditionalProperty(string $name)` | the value, or **`false`** when absent |
 
 On the builder the setter is renamed to `additionalProperty(string $name, $value): self`. It delegates
@@ -152,8 +107,6 @@ setter names exactly which one the field uses — that is how you identify the w
 Each family also has collection variants — `…Array` / `…2DArray` on the serialize side, and
 `…Array` / `…Map` / `…ArrayOfMap` / `…MapOfArray` on the deserialize side. The `…Required` variants
 return a non-nullable `\DateTime`.
-
-You rarely call these directly; they matter for reading which format a field is on the wire.
 
 ## Files
 

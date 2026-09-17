@@ -1,18 +1,17 @@
 ---
 name: 'php-client-initialization'
-description: 'Construct and configure an APIMatic-generated PHP SDK client — `{Client}Builder::init()` returns a fluent builder whose setters are the complete list of supported options, `build()` produces an immutable client, `Environment` class constants select the base URL (there is no free-form base-URL option), controllers are reached through `$client->get{Group}{Postfix}()` accessors whose suffix is the `ControllerPostfix` generator setting (`Controller` unless the build renamed it), and `toBuilder()`/`withConfiguration()` are the only ways to vary a built client. Use the moment you construct the PayPal Server SDK PHP SDK client, pick an environment, or wire it into your app — load it even after reading the builder in the source, since the setter list shows the arguments but not that `timeout` is in seconds, that the client is immutable, or the reuse-one-client lifetime rule.'
+description: 'Construct and configure the PayPal Server SDK PHP SDK client. Load before you call the builder or wire the client into an application. The method list won''t tell you the client is immutable and built through `{Client}Builder::init()`, that controllers are accessors whose suffix is per-SDK, or which settings a rebuilt client keeps.'
 ---
 
 # Initializing an APIMatic-generated PHP SDK client
 
-This applies to **any** APIMatic-generated PHP SDK (APIMATIC v3.0). Replace the `{...}` placeholders
-below with the real names from your SDK's source:
+Replace the `{...}` placeholders below with the real names from your SDK's source:
 
 - `{Client}` — the client class in `src/`, e.g. `src/AcmeClient.php`. Its builder is `{Client}Builder`.
 - `{Group}` — an API group; the client exposes one memoized accessor per group, `get{Group}{Postfix}()`.
-- `{Postfix}` — the accessor/class suffix, set by the `ControllerPostfix` generator setting. It is
-  `Controller` unless that setting renamed it (`Api`, `Client`, …), and it renames the folder, the classes
-  and the client getters together — `ls src/` and read the accessor names off `src/{Client}.php` before
+- `{Postfix}` — the accessor/class suffix, which is named per SDK. It is
+  `Controller` unless this one renamed it (`Api`, `Client`, …), and that one name covers the folder, the
+  classes and the client getters together — `ls src/` and read the accessor names off `src/{Client}.php` before
   writing one.
 
 An API split across multiple namespaces generates **one client class per namespace**, so `ls src/*.php`
@@ -69,10 +68,9 @@ Additional setters appear **conditionally**, so their absence is meaningful:
 - one `->{scheme}Credentials(…)` per auth scheme — this API declares at least one, so
   expect them (see **php-authentication**);
 - one per server parameter declared by the API;
-- `loggingConfiguration(…)`, which this SDK has — it was generated with
-  `EnableLogging`;
-- `additionalHeaders(…)` / `userAgentDetail(…)` / `skipSslVerification(…)` only when the corresponding
-  generator option was enabled.
+- `loggingConfiguration(…)`, which this SDK has;
+- `additionalHeaders(…)` / `userAgentDetail(…)` / `skipSslVerification(…)`, each present only in an SDK
+  built with it — read the builder to see which of them yours has.
 
 > **`httpCallback()` fails silently.** Its implementation is
 > `if (!$httpCallback instanceof CoreCallback) { return $this; }` — pass anything else and the call is
@@ -90,13 +88,13 @@ $client = {Client}Builder::init()
     ->build();
 ```
 
-Names come from the API spec's server list, so do not assume a particular one exists — there may be no
+Do not assume a particular name exists — there may be no
 `PRODUCTION` at all. A name also does not imply a live host: match each constant to the URL it actually
 resolves to in the `ENVIRONMENT_MAP` private const in `src/{Client}.php`.
 
 `environment()` takes a `string`, so nothing stops you passing an arbitrary value — but the base URL is
 looked up in that private map by exactly this key, so an unknown environment has no URL to resolve to.
-**There is no free-form base-URL option.** Some APIs expose server parameters (a templated host segment,
+Some APIs expose server parameters (a templated host segment,
 a port) as their own builder setters that feed the URL template; check `src/{Client}Builder.php`.
 
 To confirm what a built client actually resolved to:
@@ -146,24 +144,6 @@ refreshed OAuth token — see **php-authentication**.
 
 `$client->getConfiguration()` returns the current config as an array (useful for logging what a client
 was actually built with).
-
-## Dependency injection
-
-PHP has no single DI standard, but PSR-11 containers are the norm. Register the client as a **shared
-(singleton) service** built by a factory closure, and inject the client — or a narrow interface of your
-own over the operations you use — rather than constructing inside consumers:
-
-```php
-// e.g. a PSR-11 container definition
-$container->set({Client}::class, function () {
-    return {Client}Builder::init()
-        ->environment(Environment::{CONSTANT})
-        ->build();
-});
-```
-
-Wrapping the client behind your own interface also gives you the seam you will want for tests — see
-**php-testing**, since the SDK itself exposes no HTTP-client injection point.
 
 ## Next
 

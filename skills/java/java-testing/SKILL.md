@@ -1,6 +1,6 @@
 ---
 name: 'java-testing'
-description: 'Unit-test code that calls an APIMatic-generated Java SDK — the transport is OkHttp, so the in-process seam is your own `okhttp3.OkHttpClient` handed to `.httpClientInstance(...)` inside the `httpClientConfig` lambda, with an interceptor returning canned responses; `HttpCallback` captures the outgoing request for assertions, and the generated `HttpCallbackCatcher` is test-tree-only so it is not on your classpath. The client and every controller are `public final` with no interface behind them, so a mocking library has nothing to substitute and the transport seam is the only route. Use when writing, mocking or stubbing tests for calls made through the PayPal Server SDK Java SDK — load it even after reading the builder in the source, since the option list won''t tell you which member is the seam, that the base URL cannot simply be overridden, or that retries are off unless your own code turns them on — so a stubbed 5xx fails on the first attempt as long as the stub keeps `numberOfRetries(0)`.'
+description: 'Unit-test code that calls the PayPal Server SDK Java SDK. Load before stubbing the SDK. The option list won''t tell you the in-process seam is your own `OkHttpClient` handed to `.httpClientInstance(...)`, that `HttpCallback` observes rather than substitutes, or that a stubbed 5xx needs `numberOfRetries(0)` to fail on the first attempt.'
 ---
 
 # Testing code that uses an APIMatic Java SDK
@@ -16,17 +16,10 @@ dependence on the SDK's internals.
 > (below) or, if you really want a live socket, run a mock server and rewrite the request URL in an
 > interceptor.
 
-**Match the project's existing test stack — don't impose one.** Check the consuming project's `pom.xml`
-or `build.gradle` and its existing tests, then mirror both the **framework** (JUnit 5, JUnit 4, TestNG)
-and the **assertion style**. The samples below use JUnit 5 **purely for reference** — they show the seam
-and *what* to assert, not a mandated framework. (The SDK's own generated tests, when it has any, use
-JUnit 4; that is the SDK's business, not yours.)
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Api}Client`,
-> `{Controller}`, `{operation}`) — replace it with the concrete identifier from the source.
+The samples below use JUnit 5 for reference only — mirror whatever the project already uses.
 
 ## What you can substitute, and what you cannot
-**This SDK was generated without `GenerateInterfaces`, so there is nothing for a mocking library to
+**This SDK ships no interfaces, so there is nothing for a mocking library to
 substitute.** The client is `public final` with a private constructor, and every controller is a
 `public final` class with no interface behind it — most mocking libraries cannot subclass either without
 extra configuration.
@@ -138,10 +131,8 @@ The test method declares `throws Exception` because the blocking operation decla
 
 Which exception to expect depends on the operation: a typed subclass under `<root>/exceptions/` where the
 spec gave that error a **modelled body**, base `ApiException` otherwise. At least one error here has such
-a body, so both kinds are live. `doc/controllers/{group}.md` lists them in its **Errors** table, but that
-table is emitted for every documented error and its *Exception Class* column falls back to the base
-`ApiException` name, so check the operation's own `.localErrorCase(...)` calls before naming a type in a
-test. **Assert the concrete type, not `ApiException`** — every typed subclass derives from it, so a test
+a body, so both kinds are live. Take the type from the operation's own `.localErrorCase(...)` calls and
+not from the `doc/` Errors table (**java-error-handling**). **Assert the concrete type, not `ApiException`** — every typed subclass derives from it, so a test
 expecting `ApiException` passes for all of them and proves nothing.
 
 ```java
@@ -215,32 +206,24 @@ assertEquals(200, captured.get().getResponse().getStatusCode());
 ```
 
 The parameters are the runtime's `Request`/`Context` interfaces — **not** the SDK's own `HttpRequest` /
-`HttpResponse` — but **no cast is needed** for what you assert on: `context.getResponse()` declares
-`getStatusCode()`, `getHeaders()`, `getBody()`, `getRawBody()` and `getRawBodyString()`, and `Request`
-declares `getHttpMethod()`, `getQueryUrl()`, `getHeaders()` and `getBody()`. Cast only to reach the SDK's
-covariant types (`Headers` rather than `HttpHeaders`). Take the exact
-import for `Request` and `Context` from the `Callback` interface that the SDK's `HttpCallback` extends,
-rather than guessing the package. Note that this `Request` is a **different type** from `okhttp3.Request`
-in the stub above; if a test file uses both, fully qualify one of them.
+`HttpResponse` — but no cast is needed for what you assert on. Take the imports from the `Callback`
+interface the SDK's `HttpCallback` extends, and note that this `Request` is a **different type** from
+`okhttp3.Request` in the stub above.
 
 ## Notes
 
-- **`HttpCallbackCatcher` is not yours to use.** SDKs generated with tests emit one under
-  `src/test/java/<root>/testing/` — that is the SDK project's *test* source set, so it is not published
-  in the jar and is not on your compile classpath. Write the four-line `HttpCallback` above instead.
-- **Keep `numberOfRetries(0)` in the stub.** Retries are off in a generated Java SDK — the runtime default
-  is `0` and the generated code never raises it, whatever the `Retries` code-generation setting said — so
-  the line costs nothing and keeps a stubbed `5xx` failing on the first attempt if the code under test
-  sets a retry count on the same builder. To test that retries *do* fire, set a count yourself and count
-  interceptor invocations while returning `503` then `200`; the generated
-  `HttpClientConfiguration.Builder()` constructor lists which methods and statuses are retryable.
+- **Keep `numberOfRetries(0)` in the stub**, so a stubbed `5xx` fails on the first attempt even if the
+  code under test sets a count on the same builder. To test that retries *do* fire, set a count yourself
+  and count interceptor invocations while returning `503` then `200` (see
+  **java-configuration-resilience**).
 - **Controllers come from the stubbed client** (`stub.client.get{Controller}()`), so a stubbed client is
   all you need — there is nothing else to fake.
 - **For DI-based code**, override the client bean in the test context (Spring:
   `@TestConfiguration` with a `@Bean` returning the stubbed client, or `@MockBean` on your own wrapper). Prefer stubbing the transport over mocking the SDK types — the client and every controller are `public final` with no interface, which most mocking libraries cannot subclass without extra configuration.
 - To look up an operation's signature or its request type, read the SDK
-  source: the controller class the client exposes through its `get...()` accessor (its package is a
-  generator setting — `<root>/controllers/` by default, but a controller postfix or the
-  `ControllerNamespace` setting renames it), plus `<root>/models/` and `<root>/exceptions/`. The doc page
-  for the same group is the alternative: a controller postfix moves only the source package, but
-  `ControllerNamespace` renames the doc folder too — `ls doc/` rather than assuming `doc/controllers/`.
+  source: the controller class the client exposes through its `get...()` accessor (its package is named
+  per SDK — `<root>/controllers/` by default, but a controller postfix or a renamed controller namespace
+  moves it), plus `<root>/models/` and `<root>/exceptions/`. The doc page
+  for the same group is the alternative: a controller postfix moves only the source package, but a
+  renamed controller namespace moves the doc folder too — `ls doc/` rather than assuming
+  `doc/controllers/`.

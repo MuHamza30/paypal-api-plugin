@@ -1,6 +1,6 @@
 ---
 name: 'java-authentication'
-description: 'Configure authentication on an APIMatic-generated Java SDK client — every scheme is a `{Scheme}Model` you build with its own nested `Builder` (required credentials in the Builder''s constructor, optional ones as fluent setters) and hand to a setter on the client Builder: `.{scheme}Credentials(model)`, or the suffix-less `.clientCredentialsAuth(model)` / `.authorizationCodeAuth(model)` when the API''s only scheme is an OAuth 2 grant; covers Basic, custom header, custom query (API key), bearer/access token, and the OAuth 2.0 grants. This API declares at least one scheme, so all of it applies. Use the moment you set credentials, an API key, a token, or OAuth on the PayPal Server SDK Java SDK — load it even after reading the Builder in the source, since the setter name alone won''t tell you it takes a built model object, that an unset credential defaults to empty strings and then fails the first call inside the SDK with an unchecked `AuthValidationException` instead of reaching the API for a `401`, or that only the client-credentials grant fetches a token for you.'
+description: 'Set credentials on the PayPal Server SDK Java SDK. Load before configuring any scheme, or when a call comes back 401 or 403. The builder won''t tell you each credential field is pre-initialised with empty strings so a forgotten setter fails inside the SDK, that only client credentials fetches a token for you, or which getter reads the model back.'
 ---
 
 # Authenticating an APIMatic Java SDK client
@@ -11,9 +11,6 @@ description: 'Configure authentication on an APIMatic-generated Java SDK client 
 How you authenticate depends on the security scheme(s) the API uses. APIMatic surfaces each scheme as a
 **`{Scheme}Model` data class plus a matching setter on the client `Builder`**. Set the ones your API uses
 when you build the client (see `java-client-initialization`).
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Api}Client`,
-> `{Scheme}Model`) — replace it with the concrete identifier from the source.
 
 To see which schemes a specific SDK accepts, read the **credential setters on `{Api}Client.Builder`** —
 those are the source of truth. The models live in `<root>/authentication/`; the credentials *interface*
@@ -93,7 +90,7 @@ caches it, and refetches when it expires.
 ```
 
 The other grants (authorization code, resource-owner password) do **not** fetch anything on their own —
-you drive the flow and rebuild the client with the token. See [reference.md](reference.md).
+you drive the flow and rebuild the client with the token; see *More schemes* below.
 
 ## Reading credentials back off the client
 
@@ -109,8 +106,26 @@ the exact names in `{Api}Client.java`.
 
 ## More schemes
 
-For OAuth 2 **authorization code**, **resource-owner password**, token persistence and refresh
-callbacks, and **multiple/combined** schemes (AND/OR), see [reference.md](reference.md).
+**Authorization code** is not automatic: send the user to
+`client.get{Scheme}Auth().buildAuthorizationUrl()`, exchange the code your redirect endpoint receives
+with `fetchToken(code)`, then **rebuild the client** with that token through
+`client.newBuilder().{scheme}Auth(client.get{Scheme}AuthModel().toBuilder().oAuthToken(token).build())`.
+Until the token is attached, calls fail with an auth error saying an OAuth token is needed — that is the
+symptom of skipping the rebuild. The credentials interface also carries `refreshToken()` and
+`isTokenExpired()`. **Resource-owner password** is the same flow without the browser step; its model
+`Builder` takes client id, client secret, username and password.
+
+Only client credentials refreshes itself, through `oAuthOnTokenUpdate` (persist) and `oAuthTokenProvider`
+(load); for the other grants call `refreshToken()` yourself and rebuild. The token model is an ordinary
+Jackson-serializable class, so storing it as JSON is enough.
+
+There is **no combined credentials object**: set every scheme the operations you call require, and the
+controller applies the composition per operation — **AND** applies each scheme in the group, **OR** uses
+the first satisfied one. The `.withAuth(...)` block in the controller method is what decides.
+
+To see what this SDK accepts, list the `Builder` methods on `{Api}Client.java` ending in `Credentials`
+(or the suffix-less OAuth ones), then read the matching `{Scheme}Model` `Builder` constructor under
+`<root>/authentication/` for the required values; `doc/auth/*.md` restates it with a snippet.
 
 ## Notes
 
@@ -127,5 +142,3 @@ callbacks, and **multiple/combined** schemes (AND/OR), see [reference.md](refere
   scheme the endpoints you call require.
 - Set credentials when you build the client. To rotate them later, derive a new client with
   `client.newBuilder().{scheme}Credentials(...).build()` — the built client is immutable.
-- Keep secrets out of source — read them from the environment (`System.getenv(...)`) or a secrets
-  manager, never hardcode them. The samples above deliberately show that form.

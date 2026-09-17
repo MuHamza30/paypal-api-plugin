@@ -118,17 +118,12 @@ declared members alone misses it. Check for the wrapped converter before writing
 
 ## oneOf / anyOf container
 
-```csharp
-// namespace PaypalServerSdk.Standard.Models.Containers
-[JsonConverter(
-    typeof(UnionTypeConverter<{Union}>),
-    new[] { typeof({VariantA}Case), typeof({VariantB}Case) },
-    true)]                                          // trailing bool: true = oneOf, false = anyOf
-public abstract class {Union}
-```
+A container in `PaypalServerSdk.Standard.Models.Containers` is an abstract class carrying a
+`[JsonConverter(typeof(UnionTypeConverter<{Union}>), …)]` attribute whose trailing bool is `true` for
+`oneOf` and `false` for `anyOf`.
 
 **Count the attribute's arguments — a container union can be discriminated, and that changes how it
-matches.** The 3-argument form above matches **structurally**: the body is tried against each case, and for
+matches.** The three-argument form matches **structurally**: the body is tried against each case, and for
 `oneOf` matching none or more than one throws. What makes that match decidable is **`[JsonRequired]` on the
 variants' required properties** — where a container's variants are object models, grep `Models/` for it and
 you will find it on those variants and nowhere else. (A container whose cases are bare scalars carries none,
@@ -137,18 +132,10 @@ told apart**: every input matches both, so a `oneOf` throws on every payload and
 undeserializable by construction. If a union fails on input you believe is valid, compare the variants'
 required sets before doubting your payload. So a body missing one of a variant's required fields does not match it, and a body carrying
 the required fields of *two* variants matches both and throws on a `oneOf`. Unmodelled extra fields do
-**not** affect the match; they land in that variant's own additional-properties surface. A **5-argument** form adds a discriminator:
+**not** affect the match; they land in that variant's own additional-properties surface.
 
-```csharp
-[JsonConverter(
-    typeof(UnionTypeConverter<{Union}>),
-    new[] { typeof({VariantA}Case), typeof({VariantB}Case) },
-    new[] { "{discriminatorValueA}", "{discriminatorValueB}" },   // one per case, in the same order
-    "{discriminatorWireName}",                                    // the field carrying it
-    true)]                                       // still oneOf/anyOf — read it, do not assume `true`
-```
-
-The trailing bool means the same thing here as in the 3-argument form, and a discriminated container can be
+A **five-argument** form adds a discriminator: one more array, giving one value per case in case order,
+plus a string naming the field that carries it. The trailing bool means the same thing here as in the 3-argument form, and a discriminated container can be
 **either**. Check it before writing the catch: a discriminated `anyOf` (trailing `false`) raises
 `AnyOfValidationException`, not `OneOfValidationException`.
 
@@ -175,25 +162,11 @@ consequences, all of which bite:
 **Read the attribute before constructing or parsing one**, and take the values from it rather than from the
 variants' enum type, which may admit more.
 
-```csharp
-public abstract class {Union}
-{
-    public static {Union} From{VariantA}({VariantA} value) => new {VariantA}Case().Set(value);
-
-    public abstract T Match<T>(Func<{VariantA}, T> {variantA}, Func<{VariantB}, T> {variantB});
-
-    public T MatchSome<T>(Func<{VariantA}, T> {variantA} = null, Func<{VariantB}, T> {variantB} = null)
-        => Match({variantA}, {variantB});
-
-    [JsonConverter(typeof(UnionTypeCaseConverter<{VariantA}Case, {VariantA}>))]
-    private sealed class {VariantA}Case : {Union}, ICaseValue<{VariantA}Case, {VariantA}> { … }
-}
-```
-
-The case classes are **`private sealed`** — a type you cannot name, so there is no `switch`, no cast, and
-no `Is{Variant}`/`Get{Variant}` accessor. `MatchSome` is `Match` with `null` callbacks, and a case whose
-callback is `null` yields `default(T)` silently. `doc/models/containers/{union}.md` lists every case with
-its factory.
+You build one with `{Union}.From{Variant}(value)` and read it with `Match<T>(...)`, which takes one
+callback per variant. The case classes are **`private sealed`** — a type you cannot name, so there is no
+`switch`, no cast, and no `Is{Variant}`/`Get{Variant}` accessor. `MatchSome` is `Match` with optional
+callbacks, and a case whose callback is `null` yields `default(T)` silently.
+`doc/models/containers/{union}.md` lists every case with its factory.
 
 ## Discriminated hierarchy
 
@@ -214,13 +187,13 @@ child is the `KnownSubType` list**, so read it rather than the spec.
 ## Additional (unknown / future) properties
 
 Support is **not** per-model, and the generator has **two different shapes** for it. Which one a build
-carries is a code-generation setting, and one file tells you which — so `ls` before writing any access:
+carries varies per SDK, and one file tells you which — so `ls` before writing any access:
 
-| What you find | Which shape | The setting behind it |
-| --- | --- | --- |
-| `Models/BaseModel.cs` | a shared base class the accepting models inherit, exposing a **public dictionary property** | `EnableAdditionalModelProperties` on its own |
-| `Utilities/AdditionalPropertiesExtensions.cs`, and **no** `Models/BaseModel.cs` | a per-model private `[JsonExtensionData]` dictionary behind a **`public this[string key]` indexer on the model itself** | `ExtendedAdditionalPropertiesSupport` |
-| neither file | no model in this SDK accepts extra fields — unmodelled JSON is silently dropped | both off |
+| What you find | Which shape |
+| --- | --- |
+| `Models/BaseModel.cs` | a shared base class the accepting models inherit, exposing a **public dictionary property** |
+| `Utilities/AdditionalPropertiesExtensions.cs`, and **no** `Models/BaseModel.cs` | a per-model private `[JsonExtensionData]` dictionary behind a **`public this[string key]` indexer on the model itself** |
+| neither file | no model in this SDK accepts extra fields — unmodelled JSON is silently dropped |
 
 The two are mutually exclusive: the extended setting suppresses `BaseModel.cs` entirely.
 
@@ -257,7 +230,7 @@ about which models accept extras. The per-model answer is in `doc/models/{model}
 ### Shape 2 — the per-model indexer
 
 ```csharp
-// Models/{Model}.cs on an ExtendedAdditionalPropertiesSupport build — no BaseModel involved
+// Models/{Model}.cs on a build with the extended surface — no BaseModel involved
 [JsonExtensionData]
 private readonly IDictionary<string, JToken> additionalProperties;   // constructor-initialised
 
@@ -282,7 +255,7 @@ on write; that is the same defect behind the off-shape error body in **csharp-er
 > deserialization failure and rethrows it as `KeyNotFoundException`, so a key that *is* present but does
 > not convert to `{T}` reports as absent. This only bites where the indexer's declared type is narrower
 > than `object`; if a key you know you wrote reads back as missing, suspect the type before the key. One variation worth reading off the class rather than assuming:
-on an `EnableImmutableModels` build the indexer's `set` is `private` — values go in through the model's
+on an immutable-models build the indexer's `set` is `private` — values go in through the model's
 `Builder.AdditionalProperty(key, value)` instead — and on that build a model that has subclasses
 declares the field `protected` rather than `private`. Here the signal is the indexer, not a base class,
 and `doc/models/{model}.md` also carries *"This model accepts additional fields of type …"* — a line
@@ -312,11 +285,11 @@ per parameter.
    on. **Their absence is meaningful**: `ls` the directory rather than assume.
 3. `doc/models/{model}.md` — the same fields with a **Tags** column marking the required ones. On a
    `BaseModel` build it says **nothing** about additional properties, so `: BaseModel` on the class is
-   the only signal; on an `ExtendedAdditionalPropertiesSupport` build it *does* print *"This model
+   the only signal; on a build with the extended surface it *does* print *"This model
    accepts additional fields of type …"*, and the signal on the class is the `this[string key]`
    indexer.
-4. `Equals` is emitted on every model unless the build set `CSharpSkipEqualityMethods` (exception
-   classes never get it). **`GetHashCode` is emitted only on immutable-models builds**
-   (`EnableImmutableModels`), so on an ordinary build a model compares by value and still hashes by
+4. `Equals` is emitted on every model in some builds and on none in others (exception classes never
+   get it). **`GetHashCode` is emitted only on immutable-models builds**, so on an ordinary build a
+   model compares by value and still hashes by
    reference identity — it is broken as a `Dictionary`/`HashSet` key even though the `Equals` grep
    succeeds.

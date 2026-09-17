@@ -1,0 +1,26 @@
+{
+  "name": "paypal-api-plugin",
+  "owner": {
+    "name": "MuHamza30",
+    "email": "muhammad.hamza@apimatic.io"
+  },
+  "metadata": {
+    "description": "Marketplace hosting the paypal-api plugin: skills for integrating the APIMatic-generated PayPal Server SDK.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "paypal-api",
+      "source": "./",
+      "description": "Integrate and consume the APIMatic-generated PayPal Server SDK — bundled skills for C#, Java, PHP, Python, Ruby and TypeScript.",
+      "version": "1.0.0",
+      "author": {
+        "name": "MuHamza30",
+        "email": "muhammad.hamza@apimatic.io"
+      },
+      "license": "MIT",
+      "keywords": ["paypal", "sdk", "apimatic", "payments", "api"],
+      "category": "development"
+    }
+  ]
+}

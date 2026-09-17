@@ -1,6 +1,6 @@
 ---
 name: 'csharp-testing'
-description: 'Unit-test code that calls an APIMatic-generated C# SDK — the client is `sealed` with a private constructor and controllers take an `internal` constructor and declare no `virtual` method, so a mocking library has nothing to substitute; the one injectable seam is `.HttpClientConfig(c => c.HttpClientInstance(new HttpClient(handler)))` with an `HttpMessageHandler` you write, while `HttpCallback` only observes and the response type, models and typed exceptions are all publicly constructible. Use when writing, mocking or stubbing tests for calls made through the PayPal Server SDK C# SDK — load it even after reading the builder in the source, since the method list won''t tell you which member is the seam, that no base-URL setter exists to point the client at a mock server, or the two things a stub handler must do before a call gets through at all.'
+description: 'Unit-test code that calls the PayPal Server SDK C# SDK. Load before stubbing the SDK. The member list won''t tell you the one injectable seam is an `HttpMessageHandler` passed through `.HttpClientConfig(...)`, that the client is `sealed` with an internal controller constructor, or the two things a stub handler must do before a call gets through at all.'
 ---
 
 # Testing code that uses an APIMatic C# SDK
@@ -12,21 +12,11 @@ HttpClient(handler)))`, with an `HttpMessageHandler` you write. Confirm both mem
 `HttpClientInstance(HttpClient, bool overrideHttpClientConfiguration = true)` in
 `Http/Client/HttpClientConfiguration.cs`.
 
-> **There is no base-URL setter**, so you cannot point the client at a mock server — the URL comes
-> from the `Environment` enum and a static server map in `PaypalServerSdkClient.cs`
-> (**csharp-configuration-resilience**). Answer from your handler instead.
-
-**Match the project's existing test stack — don't impose one.** Mirror the **framework** (xUnit,
-NUnit, MSTest) and the assertion style of the project's existing tests. The samples below use xUnit
-**purely for reference** — they show the seam and *what* to assert, not a mandated framework.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{Controller}`, `{operation}`, `{Model}`, `{Scheme}`, `{Error}Exception`) — replace it with the
-> concrete identifier from the source.
+The samples below use xUnit for reference only — mirror whatever the project already uses.
 
 ## What you cannot fake — and what to do instead
 
-**This SDK was generated without `GenerateInterfaces`, so there is nothing for a mocking library to
+**This SDK emits no interfaces, so there is nothing for a mocking library to
 substitute.** The client is `sealed` with a `private`
 constructor, its only interface exposes configuration but no operations, and every operation is a
 plain **non-`virtual`** method behind an `internal` constructor.
@@ -112,7 +102,7 @@ Assert.Equal(200, response.StatusCode);
 Assert.Equal("expected", response.Data.{Property});
 ```
 
-This SDK was generated with `ReturnCompleteHttpResponse`, so operations hand back an `ApiResponse<T>`
+Operations in this SDK hand back an `ApiResponse<T>`
 wrapper and the status code is assertable directly.
 
 Assert on the **deserialized model** — that is what exercises the SDK's mapping. An operation with no
@@ -172,32 +162,15 @@ Assert.Equal(204, callback.Response.StatusCode);          // also .Headers, .Raw
 Assert.Equal(HttpMethod.Delete, callback.Request.HttpMethod);
 ```
 
-`HttpCallback` is a **concrete class, not an interface**, and a bare instance already records the last
-exchange: register it, read it back via `client.HttpCallback`, take `Request` / `Response` off it.
-To see **every** exchange, subclass it and override the two virtual members — note their parameter
-types live in `Http/Request/` and `Http/Response/`, not in `Http/Client/` where `HttpCallback` itself sits:
+`HttpCallback` is a **concrete class, not an interface**: a bare instance records the last exchange, and
+subclassing it overrides `OnBeforeRequest`/`OnAfterResponse` to see every one. `Request.HttpMethod`,
+`Request.QueryUrl`, `Response.StatusCode`, `Response.Headers` and `Response.RawBody` are the members to
+assert on; most of them come from `APIMatic.Core`, so the SDK's own `HttpRequest.cs` looks empty.
 
-```csharp
-using PaypalServerSdk.Standard.Http.Client;
-using PaypalServerSdk.Standard.Http.Request;
-using PaypalServerSdk.Standard.Http.Response;
-
-internal sealed class Observer : HttpCallback
-{
-    public override void OnBeforeRequest(HttpRequest request) { /* … */ }
-    public override void OnAfterResponse(HttpResponse response) { /* … */ }
-}
-```
-
-Most members you read off those two types come from `APIMatic.Core`'s `CoreRequest`/`CoreResponse`, not
-from the SDK's own files — so `Http/Request/HttpRequest.cs` shows only a constructor. `Request.HttpMethod`,
-`Request.QueryUrl`, `Response.StatusCode`, `Response.Headers` and `Response.RawBody` are the reliable ones.
-
-It cannot substitute a response — the request is sent regardless — but that does **not** make it an
-integration-test-only tool: it composes with the handler seam. Register the callback *and* an
-`HttpClientInstance` built over your stub handler, and the callback observes the **stubbed** exchange
-without anything leaving the process. On an SDK that returns bare `T`, that is the only way to assert a
-status code in a unit test, and the only place a no-payload operation's status surfaces at all.
+It cannot substitute a response, but it **composes with the handler seam**: register the callback *and*
+an `HttpClientInstance` over your stub handler and it observes the stubbed exchange without anything
+leaving the process. On an SDK that returns bare `T` that is the only way to assert a status code in a
+unit test.
 
 ## Notes
 
@@ -208,11 +181,10 @@ status code in a unit test, and the only place a no-payload operation's status s
   override is not proof that it does.** Models commonly declare `public override bool Equals` while
   **ANDing in `base.Equals(obj)`**; where the SDK emits `Models/BaseModel.cs`, that base overrides neither
   `Equals` nor `GetHashCode`, so the chain bottoms out in **reference equality** and two identically
-  constructed models are never equal. Check the base as well as the model. Two separate settings drive
-  this: `Equals` is emitted on models unless the build set `CSharpSkipEqualityMethods` (so some SDKs have
-  none at all), while `GetHashCode` rides on `EnableImmutableModels` and is usually absent even where
-  `Equals` is present — which silently breaks any `HashSet` or dictionary keyed on a model. Exception
-  classes get neither. **Prefer asserting field by field, or comparing
+  constructed models are never equal. Check the base as well as the model. The two move
+  independently: some SDKs emit `Equals` on models and some emit none, while `GetHashCode` appears only
+  on immutable-models builds and is usually absent even where `Equals` is present — which silently
+  breaks any `HashSet` or dictionary keyed on a model. Exception classes get neither. **Prefer asserting field by field, or comparing
   `ApiHelper.JsonSerialize(...)` of both** (`PaypalServerSdk.Standard.Utilities`), rather than relying on
   equality at all.
 - **Build each test's client from `new PaypalServerSdkClient.Builder()`.** `ToBuilder()` drops the HTTP

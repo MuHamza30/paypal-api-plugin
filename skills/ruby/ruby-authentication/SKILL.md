@@ -1,6 +1,6 @@
 ---
 name: 'ruby-authentication'
-description: 'Configure authentication on an APIMatic-generated Ruby SDK client — every scheme **except custom authentication** is a generated immutable credentials class (`{Scheme}Credentials`) whose constructor takes keyword arguments and raises ArgumentError on a missing required one, passed to `Client.new` as its own named parameter; covers Basic, custom header, custom query API key, OAuth 2.0 bearer token and client-credentials, the credentials-class-free custom-auth stub, plus reading credentials from the environment. Use the moment you set credentials, an API key, a token, or OAuth on the PayPal Server SDK Ruby SDK, or need to know which schemes it accepts — load it even after reading the constructor in the source, since the parameter name alone doesn''t tell you it takes a built credentials object, that a custom-auth parameter has no class to build, that the object is immutable so attaching a fetched token means rebuilding the client, or that secrets belong in environment variables.'
+description: 'Set credentials on the PayPal Server SDK Ruby SDK. Load before configuring any scheme, or when a call comes back 401 or 403. The argument list won''t tell you each scheme takes a constructed credentials object passed by name, that OAuth identifiers keep fixed spellings whatever the scheme is called, or which schemes fetch a token for you.'
 ---
 
 # Authenticating an APIMatic Ruby SDK client
@@ -15,10 +15,6 @@ immutable credentials class to pass to it** (see `ruby-client-initialization`).
 > though the `{scheme}_credentials:` parameter still exists. Check the scheme's file for a credentials
 > class before writing the call — a custom scheme means the SDK has to be completed or regenerated, not
 > configured from your application.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{scheme}_credentials`, `{SchemeCredentials}`, `{auth_key}`) — replace it with the concrete identifier
-> from the source.
 
 ## Finding which schemes this SDK accepts
 
@@ -107,8 +103,8 @@ client = PaypalServerSdk::Client.new(
 A bearer-token scheme's keyword is `access_token:`. Every other grant names its credentials
 `o_auth_`-prefixed — `o_auth_client_id:`, `o_auth_client_secret:`, `o_auth_token:`, `o_auth_scopes:` — in
 **every** build: the generator derives them from fixed constants, so there is no `oauth_client_id:`
-spelling and `EnforceStandardizedCasing` does not change them. (The auth-manager reader on the client is
-underscore-cased from the spec's own scheme name, not from that setting — a scheme the spec calls
+spelling and no casing convention an SDK is built with changes them. (The auth-manager reader on the
+client is underscore-cased from the API's own scheme name instead — a scheme the API calls
 `Oauth2` reads `client.oauth2`, one it calls `OAuthCCG` reads `client.o_auth_ccg`; grep `@auth_managers[`
 in `client.rb` for the real reader.) The class name and the `Client.new` parameter *are* per-SDK, so
 confirm those, and the parameter list, against the credentials class's `initialize` in
@@ -173,9 +169,26 @@ pass it back into the credentials object on the next boot.
 
 ## More schemes
 
-For OAuth 2.0 **authorization code (3-legged)**, **resource-owner password**, **multiple or combined
-schemes**, **custom authentication**, and the **deprecated flat auth parameters** some single-scheme SDKs
-still accept, see [reference.md](reference.md).
+**Authorization code** is two calls with your redirect handling in between: send the user to
+`client.{auth_key}.get_authorization_url(state: nil, additional_params: nil)`, then
+`client.{auth_key}.fetch_token(authorization_code)` — the code is positional — and rebuild the client
+through `client.config.clone_with(...)` with `o_auth_token:` set on the cloned credentials. That grant's
+credentials class also carries `o_auth_redirect_uri`, and an implicit-grant scheme has
+`get_authorization_url` but **no** `fetch_token`. **Resource-owner password** prefixes the user
+credentials: `o_auth_username:` / `o_auth_password:`, not the bare names a Basic scheme uses.
+
+Where the API declares more than one scheme, each has its own credentials class and its own named
+parameter on `Client.new`; set every one the operations you call require and the SDK applies the
+combination each operation declares. With multiple schemes, `from_env` reads **scheme-prefixed**
+variables (`{SCHEME}_{PARAM}`) rather than bare ones.
+
+A scheme the API declares as **custom** generates only the scheme class, whose `error_message` and
+`valid` are TODO stubs, and **no `{SchemeCredentials}` class** — naming one raises `NameError` even
+though the `{scheme}_credentials:` parameter still exists. A *custom header* scheme is an ordinary
+API-key scheme and does generate its credentials class, so read the file rather than its name.
+
+Some older single-scheme SDKs also accept each auth parameter flat on `Client.new` and print a
+deprecation warning; use the credentials object.
 
 ## Notes
 
@@ -183,8 +196,7 @@ still accept, see [reference.md](reference.md).
   generated per API, hence the `{...}` placeholders above.
 - Credentials are set when the client is constructed. There is no setter — changing them means a new
   client (via `config.clone_with`).
-- Keep secrets out of source. Load them from `ENV` or a secrets manager, or let `Client.from_env` do it —
-  never hardcode them.
+- `Client.from_env` reads the credentials out of `ENV` for you.
 - Each scheme class defines `error_message`, the string reported when the scheme cannot be satisfied
   (e.g. a nil credential, or an expired OAuth token). If a call fails on authentication, that message
   names the parameter that is missing.

@@ -1,6 +1,6 @@
 ---
 name: 'typescript-calling-endpoints'
-description: 'Call API operations on an APIMatic-generated TypeScript/Node.js SDK — operations live on a controller class you instantiate yourself (not on the client), and an operation takes either positional parameters or one destructured options object depending on whether the build collapses parameters, always ending with `requestOptions`. Also covers building request models, TypeScript `enum`s, cancelling a call with `abortSignal`, and reading the response shape — always `ApiResponse<T>`, whose wrapped `T` varies per operation. Use whenever invoking an endpoint, building a request body, or consuming a response from the PayPal Server SDK TypeScript SDK — load it even after reading the method signature in the source, since the signature won''t warn you that the controller is constructed rather than accessed off the client, or that reaching a later optional parameter in the positional form needs `undefined` placeholders.'
+description: 'Call operations on the PayPal Server SDK TypeScript SDK. Load before the first call, and when building a request body or reading a response. The signature won''t tell you controllers are constructed rather than accessed off the client, that an operation takes either positional parameters or one options object, or where `requestOptions` sits.'
 ---
 
 # Calling endpoints on an APIMatic TypeScript SDK
@@ -9,7 +9,7 @@ Operations are **async methods on a controller class that you instantiate yourse
 properties on the client:
 
 ```typescript
-import { Client, {Controller} } from '@paypal/paypal-server-sdk';
+import { Client, {Controller} } from 'paypal-server-sdklib';
 
 const client = new Client({ /* ... */ });
 const api = new {Controller}(client);          // you construct this
@@ -18,11 +18,8 @@ const response = await api.{operation}(/* ... */);
 
 There is no `client.{apiGroup}.{operation}(...)` accessor and no operation sitting directly on the
 client. Controllers live in `src/controllers/`, one file per API group, each extending a shared base
-class. **Read the exported class name from that file** — the suffix is a generator setting, so the class
-ends in `Api` or `Controller` depending on how the SDK was built. Operation names
+class. **Read the exported class name from that file** — the suffix varies per SDK (`Api`, `Controller`, …). Operation names
 follow no fixed verb/resource pattern — take the real name from the source.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{apiGroup}`, `{operation}`, `{resource}`, `{EnumType}`) — replace it with the concrete identifier from the source.
 
 ## Method signature convention
 
@@ -46,9 +43,14 @@ async {operation}(
 ```
 
 - **The rule:** an operation is generated in Form B when it has **more than one** non-constant parameter
-  **and** the build sets `CollapseParamsToArray`, or the endpoint itself sets a collect-parameters flag.
-  Everything else is Form A. A single-parameter operation is therefore always positional, even in a
-  collapsed build. Do not infer the form from one operation — check the one you are calling.
+  **and** this build collapses them, or that endpoint collapses its own.
+  Everything else is Form A. Do not infer the form from one operation — check the one you are calling.
+- **That count is of declared parameters, not of required ones.** The optional ones count too, so an
+  operation taking one required path parameter plus a few optional headers or filters is a
+  *multi*-parameter operation and collapses on such a build — `{operation}({ {requiredParam} })`, not
+  `{operation}({requiredParam})`. Only an operation with exactly one parameter and no optional ones
+  stays positional. Reading "it really only needs an id, so it must be positional" is how this goes
+  wrong; the signature settles it in one line.
 - **In Form A**, to reach a later optional parameter, pass `undefined` for the ones you skip (see the
   next section). **In Form B** you simply omit the key, and the skipping problem does not arise.
 - **Read the parameter list at the top of the method in `src/controllers/`** — order, names and
@@ -67,8 +69,6 @@ must count them: pass `undefined` for every parameter you skip ahead of the one 
 section does not apply — name the keys you want and omit the rest.)
 
 ```typescript
-// {operation}(status?: {EnumType}, serviceLevel?: {EnumType}, createdAfter?: string,
-//             limit?: number, cursor?: string, requestOptions?: RequestOptions)
 const response = await api.{operation}(
   {EnumType}.SomeConstant,   // status
   undefined,                 // serviceLevel — skipped
@@ -165,14 +165,6 @@ No operation in this API is paginated, so a list endpoint is an ordinary awaited
 `Promise<ApiResponse<{ItemType}[]>>`:
 
 ```typescript
-// Form A signature (illustrative), read from src/controllers/:
-//   {operation}(
-//     filter?: string,
-//     startDate?: string,
-//     limit?: number,
-//     requestOptions?: RequestOptions
-//   ): Promise<ApiResponse<{ItemType}[]>>
-
 const response = await api.{operation}('some_filter', undefined, 20);
 for (const item of response.result) {
   console.log(item.id);
@@ -190,7 +182,7 @@ Read these from the SDK **source** files, not by inspecting the compiled `.d.ts`
 
 - Every operation lives on a **controller class** in `src/controllers/`, one file per API group. `ls` that
   directory to find the group, then read the exported class name off its `export class` line — the
-  suffix is a generator setting (`Api`, `Controller`, …), so do not assume it.
+  suffix varies per SDK (`Api`, `Controller`, …), so do not assume it.
 - Request/response/enum types live under `src/models/`; error types under `src/errors/`.
 
 ## Next

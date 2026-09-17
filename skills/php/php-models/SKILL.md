@@ -1,6 +1,6 @@
 ---
 name: 'php-models'
-description: 'Construct and read the non-obvious model shapes of an APIMatic-generated PHP SDK — models are plain classes built through a companion `{Model}Builder`, enums are classes of `const` (never PHP 8.1 enums) whose fields are typed `string`/`int`, with a static `checkValue()` validator on the closed ones only, oneOf/anyOf unions have no container class and are unwrapped with `instanceof`, optional-and-nullable fields gain an `unset{Field}()` that distinguishes "absent" from "null", and unmodelled JSON is dropped unless the model supports additional properties. Use when building a request body or reading a response field of the PayPal Server SDK PHP SDK that is an enum, union, list/map, or date — anything that isn''t a plain string or number. Load it even after reading the field''s type in the source, since a `string` field may really be a validated enum and a docblock-only union type carries no runtime hint at all.'
+description: 'Work with models from the PayPal Server SDK PHP SDK. Load before building a request payload or mapping a response onto your own types. The class won''t tell you the setter docblocks drive deserialization at runtime, how absent, null and set are told apart, or which builder method takes a field back off the wire.'
 ---
 
 # Working with models in an APIMatic PHP SDK
@@ -9,9 +9,6 @@ Models are plain PHP classes in `src/Models/`: private fields, a constructor tak
 fields, `get{Field}()` / `set{Field}()` pairs, and `jsonSerialize()`. Beside each one, in
 `src/Models/Builders/`, is a `{Model}Builder`. This skill covers the shapes that trip integrations up;
 the plain scalar case is in **php-calling-endpoints**.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Model}`,
-> `{Field}`, `{EnumClass}`) — replace it with the concrete identifier from the source.
 
 ## Building: the builder's `init(...)` is the required-field list
 
@@ -45,7 +42,7 @@ use PaypalServerSdkLib\Models\{EnumClass};
 $model = {Model}Builder::init({EnumClass}::{CONSTANT})->build();
 ```
 
-This SDK was generated **with** `GenerateEnums`, so a **closed** enum — one whose spec definition does not
+**This SDK validates its closed enums.** A **closed** enum — one whose definition does not
 accept values outside the listed set — gets `checkValue()` beside its constants, and an **open** enum gets
 the constants and nothing else. Closed vs open is decided **per enum**, from that enum's own definition,
 not once per SDK. One SDK routinely carries both kinds side by side — a large API can come out 85 open
@@ -128,7 +125,7 @@ is plain-optional: leaving it unset omits it, and there is no way to send an exp
 ## Unknown / future fields
 
 A model keeps only the fields it declares. Unknown JSON is **dropped** on deserialization unless the
-model was generated with additional-properties support, which shows up as
+model carries additional-properties support, which shows up as
 `addAdditionalProperty(string $name, $value)` and `findAdditionalProperty(string $name)` on the class:
 
 ```php

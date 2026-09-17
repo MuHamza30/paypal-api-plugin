@@ -1,6 +1,6 @@
 ---
 name: 'php-authentication'
-description: 'Configure authentication on an APIMatic-generated PHP SDK client — every scheme is a separate `{Scheme}CredentialsBuilder::init(…)` passed to a matching `->{scheme}Credentials(…)` setter on the client builder; covers Basic, bearer token, API key in a header or query parameter, OAuth 2 client-credentials, authorization-code and resource-owner-password, and hand-written custom auth. Use the moment you set credentials, an API key, a token, or OAuth on the PayPal Server SDK PHP SDK — load it even after reading the builder setters in the source, since the method names don''t tell you which grants fetch a token automatically, that reattaching a token means rebuilding the client, or that there is no read-from-environment factory.'
+description: 'Set credentials on the PayPal Server SDK PHP SDK. Load before configuring any scheme, or when a call comes back 401 or 403. The builder won''t tell you each scheme has its own credentials builder, that a single-scheme OAuth SDK drops the `Credentials` suffix from the accessor, or that the token provider lives on the credentials builder rather than the client.'
 ---
 
 # Authenticating an APIMatic PHP SDK client
@@ -12,11 +12,6 @@ scheme, and documented one-file-per-scheme under `doc/auth/`). Start there — a
 exactly one scheme and it is an OAuth 2 grant, where the `Credentials` suffix is dropped and it is
 `get{Scheme}()`. Grepping only for the suffixed getter on such an SDK finds nothing and looks like the
 scheme is absent.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Client}`,
-> `{scheme}`) — replace it with the concrete identifier from the source. In a `use` statement this is
-> not optional: `\{…}` after a namespace is PHP's group-use syntax, so an unsubstituted placeholder is a
-> parse error rather than an undefined class.
 
 ## The shape: one credentials builder per scheme
 
@@ -42,8 +37,8 @@ Every credentials builder follows the same rules:
 **Where `{scheme}` comes from depends on how many schemes the API has.** With more than one, each name is
 the spec's own scheme name. With exactly one, the generator **discards** the spec's name and uses a fixed
 name for the auth *type* (`BasicAuth`, `BearerAuth`, `ClientCredentialsAuth`,
-`CustomHeaderAuthentication`, …) — that is the default, and only the `UseSecuritySchemeNameForSingleAuth`
-generator setting keeps the spec's name. So `->basicAuthCredentials(…)`, `->apiKeyCredentials(…)` and
+`CustomHeaderAuthentication`, …) — that is the default, though a single-scheme SDK can also be built to
+keep the API's own scheme name. So `->basicAuthCredentials(…)`, `->apiKeyCredentials(…)` and
 `->oAuthCCGCredentials(…)` are what one *multi-scheme* spec produced; yours may differ. Only the *pattern*
 `->{schemeName}Credentials(…)` holds — read the setters off `src/{Client}Builder.php`.
 
@@ -92,6 +87,11 @@ value(s). An API key scheme may take **more than one** parameter — read `init(
 
 All grants share `oAuthToken(?OAuthToken $token)` and `oAuthClockSkew(int $seconds)` on the credentials
 builder, and `isTokenExpired(?OAuthToken $token = null)` on the manager.
+
+`OAuthToken` itself lives in `src/Models/OAuthToken.php`, with a matching `OAuthTokenBuilder` under
+`Models\Builders`. Its accessors are `getAccessToken()`, `getTokenType()`, `getExpiresIn()`,
+`getScope()`, `getRefreshToken()` and `getExpiry()` / `setExpiry()` — the ones to read when you persist
+a token and rebuild it later.
 
 > **The prefix is `oAuth`, with a capital A — not `oauth`.** Every generated setter is spelled
 > `oAuthToken`, `oAuthScopes`, `oAuthClockSkew`, `oAuthTokenProvider`, `oAuthOnTokenUpdate`, and the
@@ -176,7 +176,7 @@ guard it if the credentials are optional in your configuration.
 
 ## Custom auth
 
-If the spec declares a custom scheme, the generator emits a `{Scheme}Manager` (so
+A custom scheme has a `{Scheme}Manager` (so
 `CustomAuthenticationManager` under the single-scheme fallback name, not `CustomAuthManager`) whose
 `apply()` body is a `// TODO: Add your custom authentication here` stub — the signing is hand-written into
 the SDK, never configured from your application. **A credentials builder and a `->{scheme}Credentials(…)`
@@ -184,10 +184,23 @@ setter are still generated when the scheme declares parameters**, and their valu
 the manager's `get{Param}()` getters; a parameterless custom scheme gets neither and there is genuinely
 nothing to set. Read `src/{Client}Builder.php` before you either invent a setter or declare there is none.
 
-## More schemes and full signatures
+## More schemes
 
-For the complete per-scheme matrix — every `init(...)` signature, the manager methods each grant
-exposes, combined schemes, and how to discover the names in a specific SDK — see [reference.md](reference.md).
+**Resource-owner password** takes client id, secret, username and password on
+`{Scheme}CredentialsBuilder::init(...)` and acquires its token automatically, exactly as client
+credentials does. **Authorization code** takes client id, secret and redirect URI, and is not automatic:
+`buildAuthorizationUrl(?string $state, ?array $additionalParams)`, then
+`fetchToken(string $code, ?array $additionalParams)`, then rebuild the client with that token. It
+generates **no `oAuthTokenProvider` / `oAuthOnTokenUpdate`**, and without a token a call throws
+`\InvalidArgumentException` rather than making a request.
+
+Where an API requires more than one scheme, set every credentials builder the operation needs; the
+client composes them, and `doc/controllers/*.md` says which operation needs which.
+
+To see what this SDK accepts, read the `->…Credentials(…)` setters on `src/{Client}Builder.php`, then
+`init(...)`'s signature in `src/Authentication/` for the required parameters. The accessor is
+`get{Scheme}Credentials()`, or bare `get{Scheme}()` under the single-scheme OAuth asymmetry above, so
+read `src/ConfigurationInterface.php` rather than grepping only for the suffixed name.
 
 ## Notes
 

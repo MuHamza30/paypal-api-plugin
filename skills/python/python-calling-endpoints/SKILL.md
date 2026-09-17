@@ -21,10 +21,6 @@ Controllers live in `paypalserversdk/controllers/`, one file per API group, each
 and the errors they raise. **Grep `doc/controllers/` first**, then open the `.py` file for the exact
 signature. Operation names follow no fixed verb/resource pattern — take the real name from the source.
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{controller}`, `{operation}`, `{Model}`, `{EnumType}`) — replace it with the concrete identifier from
-> the source.
-
 ## Method signature convention
 
 Every operation is a plain synchronous method, but **operations come in two parameter shapes. Read the

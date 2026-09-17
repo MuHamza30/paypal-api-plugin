@@ -1,6 +1,6 @@
 ---
 name: 'php-calling-endpoints'
-description: 'Call API operations on an APIMatic-generated PHP SDK — operations live on a controller you get from the client via `$client->get{Group}{Postfix}()`, and an operation''s parameters are either positional or collapsed into a single associative `array $options` keyed by camelCase parameter name, decided by the `CollapseParamsToArray` generator setting rather than by how many parameters there are; an optional positional parameter carries whatever default the spec gave it (not always `null`). Also covers building request models with their builders, passing enum constants, file uploads, and reading the `ApiResponse` wrapper every operation in this SDK returns. Use whenever invoking an endpoint, building a request body, or consuming a response from the PayPal Server SDK PHP SDK — load it even after reading the method signature in the source, since the signature won''t tell you the `$options` key names, that an enum parameter is typed `string`, or that the `ApiResponse` return means no error status will ever throw at you.'
+description: 'Call operations on the PayPal Server SDK PHP SDK. Load before the first call, and when building a request body or reading a response. The signature won''t tell you the controller folder and class suffix are per-SDK, whether the operation returns a wrapper or the bare value, or that a `404` can arrive as `null`.'
 ---
 
 # Calling endpoints on an APIMatic PHP SDK
@@ -9,30 +9,28 @@ Operations are methods on a **controller you get from the client** — you never
 
 ```php
 $controller = $client->get{Group}{Postfix}();   // e.g. getShipmentsController() — or getShipmentsApi()
-                                                // if ControllerPostfix renamed the suffix
+                                                // whichever suffix this SDK uses
 $result = $controller->{operation}(/* … */);
 ```
 
 The client memoizes each controller, so calling the accessor repeatedly is free. Controllers live in
-`src/{Postfix}s/` — the directory and namespace are the *pluralised* `ControllerPostfix` CodeGen setting
-(or the `ControllerNamespace` override), so `src/Controllers/` when the postfix is `Controller`,
+`src/{Postfix}s/` — the directory and namespace are the *pluralised* class postfix, which is named per
+SDK, so `src/Controllers/` when the postfix is `Controller`,
 `src/Apis/` when it is `Api` — and each extends a shared `Base{Postfix}` (`BaseController`, `BaseApi`, …).
 Find the folder with `ls src/`: it is the one that is not `Models`/`Http`/`Utils`/`Authentication`/
 `Exceptions`/`Logging`/`Proxy`. **Read the accessor names from `src/{Client}.php`.** Operation names
 follow no fixed verb/resource pattern; take the real name from the source or from `doc/controllers/`.
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Group}`,
-> `{Postfix}`, `{operation}`, `{Model}`, `{EnumClass}`) — replace it with the concrete identifier from
-> the source.
-
 ## Two parameter conventions — check which one the method uses
 
-Neither form is the norm and neither follows from the parameter count. An operation with **more than one**
-non-constant parameter is collapsed into a single `array $options` when the SDK was generated with the
-`CollapseParamsToArray` setting on (or when that endpoint opted in individually), and stays positional
-otherwise; an operation with one parameter is positional either way. A whole SDK usually comes out one way,
-so **read a signature in the controller folder before you write the first call** — do not carry a call
-shape over from another SDK.
+Neither form is the norm, and neither follows from the parameter count alone. An operation with **more
+than one** non-constant parameter is collapsed into a single `array $options` in SDKs built to collapse
+them, and in any SDK where that one endpoint collects its parameters, and stays positional otherwise; an operation declaring **one** parameter is positional either way. Both conditions have to hold,
+so a single SDK routinely ships both shapes side by side — the collapsed form for its multi-parameter
+operations and the positional form for every one-parameter operation in the same controller. Count the
+**declared** parameters, optional ones included, not the required ones: one required id followed by a few
+optional filters is a multi-parameter operation. So **read a signature in the controller folder before you
+write the first call** — do not carry a call shape over from another operation or another SDK.
 
 ### 1. Positional parameters
 
@@ -125,8 +123,7 @@ $controller->{operation}(FileWrapper::createFromPath('/path/to/file.png'));
 ```
 
 ## Reading the response
-**This SDK returns `ApiResponse`, on every operation.** It sets `ReturnCompleteHttpResponse`, so
-`src/Http/ApiResponse.php` is generated, nothing here hands back the bare deserialized value, and the
+**This SDK returns `ApiResponse`, on every operation.** `src/Http/ApiResponse.php` is generated, nothing here hands back the bare deserialized value, and the
 generated methods carry no `@throws ApiException` annotation because in this shape an error status is not
 raised at all. Confirm it on any method in the controller directory: the return type reads `ApiResponse`.
 
@@ -139,12 +136,12 @@ and that is why the generated `doc/controllers/*.md` examples branch on it with 
 raises is a **transport** failure — DNS, refused connection, TLS, timeout — as `ApiException` with a
 `getCode()` of `0`, wherever `src/Exceptions/ApiException.php` exists. See **php-error-handling**.
 
-**On a failure, `getResult()` is typed only when the SDK was generated to map error types into the
-wrapper** — the `PhpMapErrorTypesInCompleteResponse` setting, which makes each handler chain also call
+**On a failure, `getResult()` is typed only in an SDK that maps error types into the
+wrapper** — one whose handler chains also call
 `mapErrorTypesInApiResponse()`. Without that call, and it is commonly absent, a failure leaves
 `getResult()` holding the **raw decoded body** — a plain PHP array, not an error model — so
 `->getMessage()` on it is a fatal "call to a member function on array". That call and
-`src/Exceptions/ApiException.php` are two faces of one setting, so either check answers it:
+`src/Exceptions/ApiException.php` are two faces of one decision, so either check answers it:
 `grep -rl mapErrorTypesInApiResponse src/` finds it on **every** operation when `ApiException.php` is
 absent and on **none** when it exists. In the no-mapping build, read the error out of `getResult()` as an
 array or take `getBody()` and decode it yourself.
@@ -178,12 +175,10 @@ at the top of the file. Written inline as `catch (PaypalServerSdkLib\Exceptions\
 namespaced file the name resolves **relative to the current namespace**, so the catch never matches.
 Import it, or root-anchor it as `\PaypalServerSdkLib\Exceptions\ApiException`.
 
-**The status→class map lives in the handler chain.** This SDK sets `ThrowForHttpErrorStatusCodes`, so each
-operation carries `->throwErrorOn('<status>', ErrorType::init(…))` entries naming the generated error class
-for each documented status. Whether they actually raise depends on the return shape above — in the wrapper
-shape they select a mapping target at most and never a throw. See **php-error-handling**.
+**The status→class map lives in the handler chain**, as `->throwErrorOn(...)` entries on each operation —
+see **php-error-handling** for whether they raise.
 
-> This SDK does **not** set `Nullify404`, so no operation converts a `404` into `null` — a `404` surfaces
+> In this SDK no operation converts a `404` into `null` — a `404` surfaces
 > exactly like any other non-2xx (see **php-error-handling**), and no `nullOn404()` appears anywhere in
 > the controllers. Where a return type *is* nullable, that is the API's own optional response model.
 

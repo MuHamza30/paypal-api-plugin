@@ -15,9 +15,6 @@ real names from your SDK source.
 > `doc/models/*.md` carries one page per model — field table, types, and a **Default** column. Read it
 > alongside the class body; `doc/models/containers/` covers union types.
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Model}`,
-> `{Variant}`, `{EnumType}`, `{attr}`) — replace it with the concrete identifier from the source.
-
 ## Anatomy of a generated model
 
 Each model class carries two or three class-level tables that tell you everything about its wire
@@ -117,7 +114,7 @@ A plain `date` field is a `datetime.date`. A date-**time** field is wrapped in o
 classes so the SDK knows which wire format to write — `APIHelper.RFC3339DateTime`,
 `APIHelper.HttpDateTime` or `APIHelper.UnixDateTime`. The model's own constructor applies the right
 wrapper via `APIHelper.apply_datetime_converter`, so you pass an ordinary `datetime` and read the
-wrapper back. Each wrapper has `from_datetime` / `from_value`; see [reference.md](reference.md).
+wrapper back. Each wrapper has `from_datetime` / `from_value`.
 
 > **Pass timezone-aware datetimes.** The wrappers do not agree on how to treat a naive one:
 > `RFC3339DateTime` writes it verbatim, while `HttpDateTime` reinterprets it as *local* time and labels
@@ -145,5 +142,3 @@ Models declare their attributes explicitly, and unknown JSON fields are **droppe
 unless the model was generated with an `additional_properties` bag, in which case they land there as a
 `dict`. Check the model's `__init__` for an `additional_properties` parameter; if it has none and you
 need an unmodeled field, regenerate the SDK or parse that response yourself.
-
-See [reference.md](reference.md) for the full enum, date-time and `additional_properties` shapes.

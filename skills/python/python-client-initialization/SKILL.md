@@ -5,18 +5,15 @@ description: 'Construct and configure the PayPal Server SDK Python SDK client. L
 
 # Initializing an APIMatic-generated Python SDK client
 
-This applies to **any** APIMatic-generated Python SDK (APIMATIC v3.0). Package and class names below are
-concrete for this SDK; replace the remaining `{...}` placeholders with the real names from its source:
+Package and class names below are concrete for this SDK; replace the remaining `{...}` placeholders
+with the real names from its source:
 
 - `{Resource}Controller` — a controller class in `paypalserversdk/controllers/`.
 - `{controller}` — the property that exposes it on the client.
 
 ## The shape: flat keyword arguments
 
-> Settings are flat keyword arguments on the client constructor — there is no nested options
-> object. A build that sets `UseConstructorsForConfig` is no exception: that setting changes only how
-> generated code references its own config variables internally, so the constructor you call is the
-> same either way and there is nothing to check for.
+> Settings are flat keyword arguments on the client constructor — there is no nested options object.
 
 ```python
 from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
@@ -57,15 +54,15 @@ Environments are members of the `Environment` enum in `paypalserversdk/configura
 server is a member of the `Server` enum beside it. **Read both enums for the real member names before
 naming one.**
 
-Member names come from the API spec's server list, so do not assume a particular one exists — there may
+Do not assume a particular member exists — there may
 be no `PRODUCTION` at all. A name also does **not** imply a live host: match each member to the URL it
 actually resolves to in the `Configuration.environments` map, not to what its name suggests.
 
-The base URL is **derived** from the selected environment and server by `Configuration.get_base_uri` —
-there is no free-form `base_url` argument. Some SDKs expose server parameters (e.g. a port, or a
+The base URL is **derived** from the selected environment and server by `Configuration.get_base_uri`.
+Some SDKs expose server parameters (e.g. a port, or a
 template variable) as their own `Configuration` arguments that feed the URL template; `get_base_uri`
 shows exactly which. To point the SDK at a mock or proxy that no `Environment` member covers, see
-**python-configuration-resilience** and **python-testing**.
+**python-configuration-resilience**.
 
 > **Pass no `environment` and you still get one.** It is a defaulted keyword argument, and the default
 > was chosen by the API definition rather than by you — **it may be the live environment**, and nothing
@@ -164,13 +161,6 @@ after construction:
 config = client.config.clone_with(timeout=5)
 client = PaypalServersdkClient(config=config)
 ```
-
-## Dependency injection
-
-Python has no single DI standard. Build the client once in a module-level factory (above) and inject
-that instance, or register it as a singleton provider in whatever container the project already uses.
-Inject the client — or a narrow interface of your own over the operations you call — rather than
-constructing one inside consumers, so tests can substitute a stubbed client (see **python-testing**).
 
 ## Next
 

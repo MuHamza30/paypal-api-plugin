@@ -1,6 +1,6 @@
 ---
 name: 'ruby-models'
-description: 'Construct and read the non-obvious model shapes of an APIMatic-generated Ruby SDK — the `self.names`/`self.optionals`/`self.nullables` metadata that decides what reaches the wire, the private `SKIP` sentinel that distinguishes an omitted optional attribute from an explicit nil, enum classes of frozen string constants — or of plain `Integer`s, when the spec declares an integer-based enum — with `from_value`/`validate`, oneOf/anyOf unions resolved through `UnionTypeLookUp`, discriminated inheritance, DateTime attributes, `FileWrapper` uploads, and `additional_properties`. Use when building a request body or reading a response attribute of the PayPal Server SDK Ruby SDK that is a union, enum, collection, date or file — anything that isn''t a plain string or number — or when a field you set never reaches the wire. Load it even after reading the attribute in the source, since `attr_accessor` alone won''t tell you that omission and nil serialize differently, or that the JSON name comes from `self.names` rather than the attribute name.'
+description: 'Work with models from the PayPal Server SDK Ruby SDK. Load before building a request payload or mapping a response onto your own types. The class won''t tell you how omitted and nil are told apart, which attribute names reach the wire, how a union is resolved, or what a model-free build gives you instead.'
 ---
 
 # Working with models in an APIMatic Ruby SDK
@@ -8,9 +8,6 @@ description: 'Construct and read the non-obvious model shapes of an APIMatic-gen
 Models live in `lib/paypal_server_sdk/models/`, one class per model, each extending
 `PaypalServerSdk::BaseModel`. Most are plain data objects (covered in `ruby-calling-endpoints`); this
 skill covers the shapes that trip integrations up.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Model}`,
-> `{EnumType}`, `{attribute}`) — replace it with the concrete identifier from the source.
 
 ## Anatomy of a generated model
 
@@ -28,8 +25,8 @@ guessing:
 | `to_hash` / `to_json` | serialization, inherited from `BaseModel` |
 | `to_s` / `inspect` | a readable dump of every attribute — the quickest way to see what you actually built |
 
-`initialize` comes in **two shapes depending on a generator setting**: positional arguments each with a
-default, or keyword arguments. **Open the model and read it** — do not copy the call style from another
+`initialize` comes in **one of two shapes, fixed when the SDK is generated**: positional arguments each
+with a default, or keyword arguments. **Open the model and read it** — do not copy the call style from another
 SDK:
 
 ```ruby
@@ -177,7 +174,7 @@ PaypalServerSdk::FileWrapper.new(File.open('report.pdf'), content_type: 'applica
 ## Unknown / future fields
 
 By default a model declares its attributes explicitly and `from_hash` reads only those, so an unmodelled
-JSON field is dropped on deserialization. When the spec (or a generator setting) enables additional
+JSON field is dropped on deserialization. Where a model supports additional
 properties, `initialize` takes a final `additional_properties` hash and **spreads each key into its own
 instance variable** — there is no bag object and no `additional_properties` reader, so read them back
 with `get_additional_properties`, inherited from `BaseModel`. `to_hash` writes them out alongside the

@@ -1,6 +1,6 @@
 ---
 name: 'java-configuration-resilience'
-description: 'Tune an APIMatic-generated Java SDK client — everything transport-related goes through the `.httpClientConfig(builder -> ...)` lambda on the client Builder, where `timeout` is in **seconds** and per attempt; the generated `HttpClientConfiguration.Builder()` constructor sets only the retry status codes and HTTP methods — the `Retries` code-generation setting is never emitted into Java, so retries are off (`numberOfRetries` stays at the runtime default of `0`) until your own code sets it; plus proxy settings, injecting your own OkHttpClient, environment/base-URL selection, and request/response observation through `HttpCallback` or the generated logging configuration this build ships. Use whenever adjusting retries, timeouts, the environment, paging or logging on the PayPal Server SDK Java SDK — load it even after reading the builder in the source, since the option list does not reveal the units, the per-attempt semantics, or which defaults are actually set.'
+description: 'Tune the PayPal Server SDK Java SDK client — retries, timeouts, transport, logging and the base URL. Load before changing any transport setting. The option list won''t tell you a client built without `timeout(...)` waits forever, that the verb list does not stop a `POST` being re-sent, or what a rewriting interceptor does once retries are on.'
 ---
 
 # Configuration & resilience for an APIMatic Java SDK
@@ -45,19 +45,51 @@ Read the same list back off a built client with `client.getHttpClientConfig()`, 
 `<root>/http/client/ReadonlyHttpClientConfiguration.java` for the exact list. It is the fastest way to
 confirm what a running client is actually using.
 
+**Every one of these is client-wide.** Operations take no request-options argument and no cancellation
+handle of any kind — `{operation}Async` returns a `CompletableFuture`, but cancelling that future does
+not cancel the HTTP call. If you need a deadline a caller can set per request, it has to live in your
+own code above the SDK.
+
+> **A call that fetches a token spends that budget twice.** This applies to an SDK secured by an OAuth
+> grant — check the auth setters on the client `Builder`; if there is no OAuth model, skip this.
+>
+> An operation whose cached token is missing or expired fetches one first: the **token request** goes
+> out on the same OkHttp client, under the same `timeout` — which, per the warning below, may be no
+> bound at all. `timeout` is per request, so the operation can take up to **two** full periods; size a
+> caller-side deadline against two, not one. The fetch is synchronous on the calling thread even for
+> `{operation}Async`, because the request is built before the async handoff.
+>
+> **A token-fetch failure arrives in the words a wrong client id produces.** The manager swallows the
+> underlying exception, returns the token it already held (`null` on a first call), and what surfaces is
+> an `AuthValidationException` about missing authorization. To tell "the provider is down" from "our
+> credentials are wrong", call `fetchToken()` yourself at startup where the real exception is still in
+> flight, or configure an OAuth token provider, which never reaches that path.
+
 ## Retry defaults — retries are off, and the generated code cannot turn them on
 
-The generated `HttpClientConfiguration.Builder()` constructor sets **exactly two** things:
-`httpStatusCodesToRetry(...)` and `httpMethodsToRetry(...)` — from the `StatusCodesToRetry` and
-`RequestMethodsToRetry` code-generation settings, so they vary between SDKs.
+The generated `Builder()` constructor in `<root>/http/client/HttpClientConfiguration.java` sets
+**exactly two** things:
+`httpStatusCodesToRetry(...)` and `httpMethodsToRetry(...)` — both generated per SDK, so they vary
+between SDKs. Read the constructor for the real lists.
 
 **Everything else — including `numberOfRetries` — is left at the runtime's own default**, which lives in
 the `io.apimatic:core` dependency, not in the generated code, and for `numberOfRetries` that default is
-`0`. That means:
+`0`.
 
-> **Retries are off.** Open `<root>/http/client/HttpClientConfiguration.java` and read the `Builder()`
-> constructor for the real retryable statuses and methods — those are the *only* two things it sets.
-> Retrying is **opt-in**: set `numberOfRetries(...)` explicitly if you want it.
+> ### ⚠ `timeout` is left at the runtime default too, and that default is *no timeout*
+>
+> **A client you build without calling `timeout(...)` waits forever.** The runtime's default is `0`
+> seconds, and the adapter passes it straight to OkHttp's `readTimeout`, `writeTimeout` and
+> `connectTimeout` — where **`0` means no limit**, not "use a sensible one". With `numberOfRetries` at
+> its own default of `0`, `callTimeout` receives the same `0`, so nothing bounds the call at any layer.
+>
+> A provider that accepts the connection and then stops responding will hold the calling thread until
+> the socket is closed from the other end, which may be never. This is the more dangerous of the two
+> defaults: an SDK that does not retry fails fast and visibly, while one with no timeout hangs.
+>
+> Confirm rather than assume — the adapter version floats independently of the SDK. Build a client the
+> way production builds it and read `client.getHttpClientConfig().getTimeout()`. **Set `timeout(...)`
+> explicitly on every client you construct**, the same way you would set `numberOfRetries(...)`.
 
 Notes that follow from the same shape:
 
@@ -70,9 +102,8 @@ Notes that follow from the same shape:
 > Two paths re-send a request **without consulting the verb list at all**, so a write can be repeated
 > even when `POST` is absent from it.
 >
-> **1. The adapter re-sends on any `SocketException`, unbounded.** Its retry interceptor wraps the call
-> as `try { return chain.proceed(request); } catch (SocketException e) { return getResponse(chain,
-> request, response, false); }` — a **recursive** re-send that consults neither `httpMethodsToRetry` nor
+> **1. The adapter re-sends on any `SocketException`, unbounded.** Its retry interceptor catches one and
+> calls itself — a **recursive** re-send that consults neither `httpMethodsToRetry` nor
 > `numberOfRetries`. `SocketException` covers connection reset, broken pipe and "software caused
 > connection abort", all of which happen **after** the request bytes are on the wire, so the server may
 > well have processed the write. This path is installed only when `numberOfRetries > 0` — so it is
@@ -93,14 +124,10 @@ Notes that follow from the same shape:
   `client.getHttpClientConfig().getMaximumRetryWaitTime()` rather than assuming a number, and raise it if
   `(numberOfRetries + 1) × timeout` plus backoff could legitimately exceed it.
 - Retries happen inside the SDK, before any exception reaches your `catch` block.
-- **Retries are off until your own code turns them on.** The OkHttp adapter installs its retry
-  interceptor **only when `numberOfRetries` is above zero**, so at `0` a client makes exactly one attempt
-  per call and `numberOfRetries(0)` is a no-op. The Java generator never writes that value into the
-  generated code: the `Retries` code-generation setting is not emitted here at all, so a build with
-  `Retries: 3` produces the same two-statement `Builder()` constructor as a build with `Retries: 0`, and
-  `numberOfRetries` sits at the runtime's default of `0` either way. **The only thing that switches
-  retries on is `numberOfRetries(n)` in your own `httpClientConfig` lambda** — do not read the generated
-  constructor for a retry count, it can never carry one. Once you set it, every status and method listed
+- **`numberOfRetries(0)` is a no-op.** The OkHttp adapter installs its retry interceptor **only when
+  `numberOfRetries` is above zero**, so at the default a client makes exactly one attempt per call, and
+  `numberOfRetries(n)` in your own `httpClientConfig` lambda is the only thing that switches retrying
+  on. Once you set it, every status and method listed
   in that constructor is retried underneath your code. Raise it only where nothing above the SDK already
   retries — a job scheduler, a message consumer, a failover wrapper, or your own loop. Retry layers
   multiply rather than add: `numberOfRetries(3)` is **four** requests per attempt, so inside a
@@ -120,9 +147,41 @@ parameters (a port, a tenant) as their own `Builder` methods.
 client.getBaseUri();                  // what it actually resolved to
 ```
 
-Read the `Environment` enum for the real member names — they come from the spec's server list and a
-`PRODUCTION` member may not exist. To point the SDK somewhere no environment covers (a mock server, a
-recording proxy), inject an `OkHttpClient` with an interceptor — see **java-testing**.
+Read the `Environment` enum for the real member names — a
+`PRODUCTION` member may not exist.
+
+To point the SDK somewhere no environment covers (a mock server, a recording proxy, a gateway), route
+through a proxy (below), or inject an `OkHttpClient` carrying an interceptor that rewrites the URL and
+then forwards it:
+
+```java
+Interceptor rewrite = chain -> {
+    HttpUrl target = HttpUrl.get(System.getenv("API_BASE_URL"));
+    HttpUrl url = chain.request().url().newBuilder()
+            .scheme(target.scheme()).host(target.host()).port(target.port())
+            .build();
+    return chain.proceed(chain.request().newBuilder().url(url).build());
+};
+```
+
+> ### ⚠ That interceptor and the SDK's retries cannot both be on
+>
+> **With `numberOfRetries` above zero, a rewriting interceptor makes every call fail with a
+> `NullPointerException` raised before any network I/O.**
+>
+> The adapter's retry interceptor loses its per-request state when it is handed a **rebuilt** request,
+> which is what a rewrite does, and dereferences null.
+> Ordering makes it unavoidable rather than a matter of care: the SDK wraps the client
+> you supply with `okHttpClient.newBuilder()`, so your interceptors are already ahead of the one it adds
+> and your rewrite always runs first.
+>
+> The retry interceptor is installed **only when `numberOfRetries > 0`**, which is why this can lie
+> dormant: redirect the base URL today with retries off, raise `numberOfRetries` next week, and the
+> failure arrives pointing at code you did not write. If you need both, keep retries at `0` on the
+> redirected client and put the retry loop in your own code above the SDK.
+>
+> Verify the version you actually have before designing around this: the adapter floats independently
+> of the SDK.
 
 ## Proxy
 
@@ -189,7 +248,7 @@ page/offset/cursor parameters yourself and stop when a page comes back shorter t
 return types — `Headers` instead of `HttpHeaders`, `HttpMethod` instead of `Method`. Take the imports for
 `Request` and `Context` from the `Callback` interface that the SDK's `HttpCallback` extends.
 
-**Also available here: built-in logging.** This SDK **was generated with logging enabled**, so it ships a
+**Also available here: built-in logging.** This SDK **ships logging**, so it has a
 `<root>/logging/configuration/` package and a `loggingConfig(...)` method on the client `Builder`:
 
 ```java
@@ -205,17 +264,3 @@ logger writes to stdout and needs nothing extra on the classpath. To route logs 
 logging stack instead, pass your own SLF4J logger with `.logger(LoggerFactory.getLogger(...))` inside the
 `loggingConfig` lambda — that path, and only that path, needs an SLF4J binding. Read
 `<root>/logging/configuration/ReadonlyLoggingConfiguration.java` for the full option set.
-
-### Verify on the wire (first run of any new integration)
-
-Turn observation on for the first execution of any new call and inspect the output. A wrong environment,
-a leftover `{placeholder}`, or a mis-serialized path segment **compiles cleanly** and produces no in-band
-signal; the only symptom is a runtime `404`/`422`.
-
-Checklist for the first logged request:
-1. the **verb** matches the operation;
-2. the **path** has no literal `{placeholder}` left unsubstituted;
-3. each **path-param segment** is the value the API expects;
-4. the query params you set actually appear in the query string.
-
-Turn it back down once verified.

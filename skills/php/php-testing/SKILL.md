@@ -1,6 +1,6 @@
 ---
 name: 'php-testing'
-description: 'Unit-test code that calls an APIMatic-generated PHP SDK — the client builder exposes no HTTP-client injection point and the base URL cannot be overridden, so the seams are your own interface over the SDK, PHPUnit test doubles of the generated (non-final) controller and client classes, and the `httpCallback(…)` hook for observing real traffic. Covers stubbing success and error paths, asserting the outgoing request, and why the SDK''s own generated `tests/` directory is not a template for yours. Use when writing, mocking or stubbing tests for calls made through the PayPal Server SDK PHP SDK — load it even after reading the builder in the source, since the setter list won''t tell you that there is no transport seam at all.'
+description: 'Unit-test code that calls the PayPal Server SDK PHP SDK. Load before stubbing the SDK. The class list won''t tell you which seam to fake, that nothing in the SDK is `final` so PHPUnit can double it, or that `httpCallback` observes a real call rather than replacing it.'
 ---
 
 # Testing code that uses an APIMatic PHP SDK
@@ -12,59 +12,22 @@ find only configuration values, credentials builders, `httpCallback` and `proxyC
 
 So the seam is **above** the SDK, not inside it.
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Client}`,
-> `{Group}`, `{operation}`) — replace it with the concrete identifier from the source. `{Postfix}` is the
-> `ControllerPostfix` generation setting: it is `Controller` by default but can be anything (`Api`,
-> `Client`, …). Read the real accessor and class names from `src/{Client}.php` and the controller folder
-> (`src/Controllers/` or `src/Apis/`, whichever `ls src/` shows); do not assume `Controller`.
+> Read the real accessor and class names from `src/{Client}.php` and the controller folder
+> (`src/Controllers/` or `src/Apis/`, whichever `ls src/` shows); the class suffix is `Controller` on
+> some builds and `Api` on others, so do not assume one.
 
-**Match the project's existing test stack — don't impose one.** Check the consuming project's
-`composer.json` and existing tests first. The examples below use PHPUnit purely for reference; they show
-*what* to assert and *where* to cut, not a mandated framework.
+The examples below use PHPUnit for reference only — mirror whatever the project already uses.
 
 ## Preferred seam — your own interface
 
-Wrap the operations you actually use behind a narrow interface you own, and fake that. This keeps your
-tests independent of SDK internals and survives regeneration:
-
-**Every operation in this SDK returns an `ApiResponse` wrapper** — it sets `ReturnCompleteHttpResponse`, so
-the gateway unwraps it, and its status check is the whole HTTP-failure path because a non-2xx never raises
-(see **php-calling-endpoints**).
-
-```php
-interface {Resource}Gateway
-{
-    /** @return {Model}[] */
-    public function list{Resource}(): array;
-}
-
-final class Sdk{Resource}Gateway implements {Resource}Gateway
-{
-    public function __construct(private {Client} $client) {}
-
-    public function list{Resource}(): array
-    {
-        // Wrap this in a try/catch for ApiException as well when
-        // src/Exceptions/ApiException.php exists, to cover transport failures.
-        // getResult() holds the error payload on a failure, so returning it straight
-        // from a method typed `: array` is a TypeError.
-        $response = $this->client->get{Group}{Postfix}()->{operation}();
-        if (!$response->isSuccess()) {
-            throw new {Resource}GatewayException(/* your own type, from getStatusCode() + getResult() */);
-        }
-        return $response->getResult();
-    }
-}
-```
-
-Test your application against `{Resource}Gateway`; test `Sdk{Resource}Gateway` itself separately (or
-against the real API in a small integration suite). The gateway is also where error translation belongs —
-it is the one place that knows how to unwrap an `ApiResponse` and what a failed one
-means.
+Wrap the operations you actually use behind a narrow interface you own and fake that, so your tests
+stay independent of SDK internals and survive regeneration. That gateway is also where error translation
+belongs — it is the one place that knows how to unwrap an `ApiResponse` and what a failed one means.
+Test your application against the interface, and the implementation against the SDK separately.
 
 ## Doubling the SDK classes directly
 
-The generator emits **no `final` classes and no `final` methods**, so PHPUnit can double a controller or
+There are **no `final` classes and no `final` methods**, so PHPUnit can double a controller or
 the client itself. `createMock()` does not invoke the constructor, which matters because the client's
 constructor builds a real HTTP client:
 
@@ -145,22 +108,32 @@ response"* in **php-error-handling**. (If you need a real instance rather than a
 ```php
 use PaypalServerSdkLib\Http\HttpCallBack;
 
-$captured = null;
+$requests = [];   // one HttpRequest per call, in order
+$contexts = [];   // one HttpContext per call, in order
 
 $client = {Client}Builder::init()
     ->httpCallback(new HttpCallBack(
-        function ($request) use (&$captured): void {
-            $captured = $request;                    // HttpRequest, before it is sent
+        function ($request) use (&$requests): void {
+            $requests[] = $request;                  // HttpRequest, before it is sent
         },
-        function ($context) use (&$captured): void {
-            $captured = $context;                    // HttpContext: getRequest() + getResponse()
+        function ($context) use (&$contexts): void {
+            $contexts[] = $context;                  // HttpContext: getRequest() + getResponse()
         }
     ))
     ->build();
 ```
 
+**Keep the two halves in separate variables, and keep a list of each.** The two callbacks receive
+*different types*, so writing both into one variable leaves it holding whichever fired last — an
+`HttpContext`, whose whole surface is `getRequest()` and `getResponse()`. Calling `getQueryUrl()` or
+`getHttpMethod()` on that is a fatal error, and those are exactly the accessors you reach for next. A
+list rather than a scalar matters for the same reason it does anywhere here: a call whose scheme fetches
+a token fires both callbacks for the token request too, before the operation's own, so a scalar would
+leave you asserting against the token exchange.
+
 Assert off the captured objects — `getHttpMethod()`, `getQueryUrl()`, `getHeaders()`, `getParameters()`
-on the request; `getStatusCode()`, `getHeaders()`, `getRawBody()` on the response.
+on an `HttpRequest`; `getStatusCode()`, `getHeaders()`, `getRawBody()` on the `HttpResponse` reached
+through `$contexts[$i]->getResponse()`. Select the entry you mean by URL rather than taking the last.
 
 > **`httpCallback()` silently ignores anything that is not a `CoreCallback`** — its body is
 > `if (!$httpCallback instanceof CoreCallback) { return $this; }`. A hand-rolled closure or a plain
@@ -195,17 +168,7 @@ $client = {Client}Builder::init()
     ->build();
 ```
 
-Retries are already off in a freshly generated SDK, but be explicit — a project-wide factory may have
-turned them on.
-
-## Do not copy the SDK's own `tests/` directory
-
-If the SDK shipped with `tests/`, those are **live integration tests against the real API**, generated
-from the spec's examples. They use a generated `tests/ClientFactory.php` plus `CallbackCatcher` and
-`CoreTestCase` from `apimatic/core`, and they make real network calls with configuration and credentials
-read from environment variables.
-They are a useful reference for *how an operation is invoked*, not a model for unit-testing your own
-code — and running them will hit the live API.
+Be explicit about it — a project-wide factory may have turned retries on.
 
 ## Notes
 

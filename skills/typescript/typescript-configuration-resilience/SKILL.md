@@ -1,6 +1,6 @@
 ---
 name: 'typescript-configuration-resilience'
-description: 'Tune an APIMatic-generated TypeScript/Node.js PayPal Server SDK SDK client — retries and timeouts live under a nested `httpClientOptions`, not at the top level; retry defaults are baked in at generation time so you must read `DEFAULT_RETRY_CONFIG` rather than assume them; timeout is per-attempt, not total; plus AbortSignal cancellation, environment selection, and the built-in `logging` config this build emits. Use whenever adjusting retry policy, timeouts, the environment, or logging on the PayPal Server SDK TypeScript SDK — load it even after reading the options in the source, since the field list does not reveal that the retry defaults vary per SDK, that timeout is per-attempt, or that there is no free-form base URL.'
+description: 'Tune the PayPal Server SDK TypeScript SDK client — retries, timeouts, cancellation, proxy, logging and the base URL. Load before changing any transport setting. The option list won''t tell you two generated fields gate retrying, that `abortSignal` never reaches a token exchange, or how to reach a host no `Environment` member covers.'
 ---
 
 # Configuration & resilience for an APIMatic TypeScript SDK
@@ -10,7 +10,7 @@ All configuration is passed at construction time in the single `Configuration` o
 not top level.
 
 ```typescript
-import { Client, Environment } from '@paypal/paypal-server-sdk';
+import { Client, Environment } from 'paypal-server-sdklib';
 
 const client = new Client({
   environment: Environment.{Name},
@@ -33,19 +33,18 @@ member (plus any server parameters such as `port`) by a private resolver in `src
 Read the `Environment` enum in **`src/configuration.ts`** for the real member names before naming one —
 they vary per API, and a name like `Production` may not exist at all.
 
-> **There is no supported way to send this client to a host no `Environment` member covers.** That is
-> the honest answer, and it is worth stating plainly because the need is common — a gateway, a sandbox
-> proxy, a recorded mock, a base URL supplied by an environment variable in production.
+> **To reach a host no `Environment` member covers** — a gateway, a sandbox proxy, a recorded mock, a
+> base URL from an environment variable — route below the SDK first, with a proxy or a DNS entry, which
+> leaves nothing for you to maintain when the runtime moves.
 >
-> **typescript-testing** describes a seam that *can* redirect traffic, but reaching it means supplying
-> your own transport adapter, i.e. owning the HTTP call the SDK was going to make. That is a reasonable
-> trade **in a test**, where you were replacing the transport anyway. In production code it means the
-> SDK is no longer making the request, and the retry, timeout and auth behaviour documented here stop
-> applying to it. Do not read the cross-reference as a supported production knob.
+> Where neither can get you there, rewrite `request.url` in an interceptor: `getRequestBuilderFactory()`
+> is public on the client and `interceptRequest` is public on the builder it returns, so the rewrite runs
+> *above* the transport and retry, timeout and auth all still apply, the token request included. Both are
+> runtime API, versioned independently of this SDK, so read them before relying on them.
 >
-> If a deployment genuinely needs an arbitrary base URL, the options are: regenerate the SDK from a
-> spec whose `ServerConfiguration` declares that environment, or route to it below the SDK — a proxy,
-> or DNS — where the client's own behaviour is unaffected.
+> Do not reach for the transport adapter in **typescript-testing** for this: supplying your own adapter
+> means owning the HTTP call the SDK was going to make, and the behaviour documented here stops
+> applying.
 
 ## Retries
 
@@ -69,7 +68,7 @@ const client = new Client({
 
 The seven fields above are the complete set. **Their defaults are fixed when the SDK is generated, not
 by the runtime** — `maxNumberOfRetries`, `httpStatusCodesToRetry` and `httpMethodsToRetry` in particular
-differ from SDK to SDK because they come from the code-generation settings for that build.
+differ from SDK to SDK.
 
 > Do not assume a default. Read `DEFAULT_RETRY_CONFIG` in **`src/defaultConfiguration.ts`** — that is
 > the generated, authoritative value for this SDK. Retries may well be off (`maxNumberOfRetries: 0`).
@@ -84,14 +83,9 @@ Anything you pass is merged over that default, so you can override one field and
 Notes:
 - Only the methods listed in `httpMethodsToRetry` are retried. If `POST`/`PATCH`/`DELETE` are absent —
   the common case — those errors surface without any retry. Add one only if the operation is idempotent.
-- `timeout` is **per attempt**, not total. To bound a whole call including retries, use an `AbortSignal`.
-- **Two generated fields gate retrying, and either one at `0` suppresses every retry** — the first
-  backoff wait is at least `retryInterval` and never fits a zero budget. `maxNumberOfRetries` is the
-  `Retries` code-generation setting and `maximumRetryWaitTime` is the `BackoffMax` setting; both default
-  to `0` and a spec can raise either independently, so a build with `Retries: 3` but `BackoffMax` unset
-  still retries nothing. **Read both values in `DEFAULT_RETRY_CONFIG` in `src/defaultConfiguration.ts`
-  before you reason about resilience** — they are what decides whether this SDK retries at all.
-  Raise both only where nothing above the SDK already retries — a queue consumer, a job runner, a
+- `timeout` is **per attempt**, not total. To bound a whole call including retries, use an `AbortSignal`
+  — but read the note below on what the signal does not reach before you treat it as a ceiling.
+- Raise both only where nothing above the SDK already retries — a queue consumer, a job runner, a
   failover wrapper, or your own orchestration loop. Retry layers multiply rather than add:
   `maxNumberOfRetries: 3` is **four** requests per attempt, so inside a 3-attempt job it is twelve
   requests against an API whose rate limit counts every one.
@@ -101,9 +95,8 @@ Notes:
 Pass an `AbortSignal` as the `abortSignal` member of `requestOptions` to bound an individual call.
 `requestOptions` is the operation's **last** parameter, but how you reach it depends on the parameter form
 the operation was generated in — positional, or one collapsed options object when the operation has more
-than one parameter and the build sets `CollapseParamsToArray` (see **typescript-calling-endpoints**). Read
-the signature in `src/controllers/` first — that folder is named by the `ControllerNamespace` generator
-setting, so confirm the name in your own `src/`:
+than one parameter and this build collapses them (see **typescript-calling-endpoints**). Read
+the signature in `src/controllers/` first:
 
 ```typescript
 const controller = new AbortController();
@@ -120,6 +113,21 @@ const b = await api.{operation}({ {id} }, { abortSignal: controller.signal });
 
 The key is `abortSignal`, not `signal`, and it is the only member `RequestOptions` has.
 
+> ### ⚠ Neither the signal nor the timeout reaches a token exchange
+>
+> **This applies to an SDK secured by an OAuth grant** — check `src/configuration.ts` for an
+> `oAuth`-prefixed credentials property; if there is none, skip this note.
+>
+> An operation whose cached token is missing or expired fetches one **first**, as a separate HTTP
+> request. Your `abortSignal` does not reach it: the auth manager calls the token method without the
+> `requestOptions` argument that would carry it, and `fetchToken` takes only `additionalParams`, so
+> there is nothing to pass from outside.
+>
+> `timeout` does not cover it either — it is applied per request, and the token exchange is a
+> *different* request from the operation, so **a call that has to fetch a token can take up to two full
+> `timeout` periods**. For a real ceiling, race the operation against your own deadline, and still
+> `abort()` the controller so the operation's own request is released.
+
 ## Pagination
 
 **No operation in this API is paginated.** `package.json` does not depend on `@apimatic/pagination`, no
@@ -130,12 +138,12 @@ asked for.
 
 ## Logging
 
-This SDK **was generated with logging enabled**, so logging is built in: the `Configuration` interface in
+**Logging is built in here**: the `Configuration` interface in
 `src/configuration.ts` carries a `logging` property, and `LogLevel`, `LoggerInterface` and `ConsoleLogger`
 are exported from the package root. Configure it directly — there is no need to wrap the transport:
 
 ```typescript
-import { Client, LogLevel } from '@paypal/paypal-server-sdk';
+import { Client, LogLevel } from 'paypal-server-sdklib';
 
 const client = new Client({
   logging: {
@@ -155,17 +163,3 @@ redirect it.
 `logRequest` and `logResponse` each also accept `headersToInclude` and `headersToWhitelist`;
 `includeQueryInPath` is request-only. Header masking is `maskSensitiveHeaders`, set on `logging` itself
 rather than on `logResponse`.
-
-## Verify on the wire (first run of any new integration)
-
-Log the first execution of any new call — by whichever mechanism the section above leaves you — and
-inspect the output. A wrong environment, a leftover `{placeholder}`, or a mis-serialized path segment
-**compiles cleanly** and produces no in-band signal; the only symptom is a runtime `404`/`422`.
-
-Checklist for the first logged request:
-1. the **verb** matches the operation;
-2. the **path** has no literal `{placeholder}` left unsubstituted;
-3. each **path-param segment** is the value the API expects;
-4. the query params you set actually appear in the query string.
-
-Turn it back down once verified.

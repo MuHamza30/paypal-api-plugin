@@ -3,44 +3,11 @@
 The exact member shapes the Java generator emits, so you can recognise each one in the source.
 
 ## Plain model
-This SDK was generated **without** immutable models, so this is the shape you will find:
 
-```java
-public class {Model} {
-    private long id;          // required
-    private String tag;       // optional
-
-    public {Model}() { }
-    public {Model}(long id, String tag) { ... }
-
-    @JsonGetter("id")
-    public long getId() { ... }
-
-    @JsonSetter("id")
-    public void setId(long id) { ... }
-
-    @JsonGetter("tag")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public String getTag() { ... }
-
-    @JsonSetter("tag")
-    public void setTag(String tag) { ... }
-
-    public Builder toBuilder() { ... }
-
-    public static class Builder {
-        public Builder() { }
-        public Builder(long id) { ... }        // required fields only
-        public Builder id(long id) { ... }     // every field gets a fluent setter
-        public Builder tag(String tag) { ... }
-        public {Model} build() { ... }
-    }
-}
-```
-
-The **`@JsonGetter`/`@JsonSetter` argument is the wire name**; the Java method name is a Pascal-cased
-rendering of it and can differ (`user_name` → `getUserName()`). When the two disagree, the annotation
-wins on the wire.
+Models are mutable: private fields with `@JsonGetter`/`@JsonSetter` pairs, a no-arg
+constructor and an all-fields one, plus a `Builder`. **The `@JsonGetter`/`@JsonSetter` argument is the
+wire name**, and the Java method name is a Pascal-cased rendering of it that can differ (`user_name` →
+`getUserName()`); when the two disagree, the annotation wins on the wire.
 
 `@JsonInclude(JsonInclude.Include.NON_NULL)` appears on every optional field's getter — that is the
 marker for "omitted when null".
@@ -156,24 +123,10 @@ public abstract class {Union} {
 
 ## Discriminated hierarchy
 
-```java
-@JsonTypeInfo(
-        use = JsonTypeInfo.Id.NAME,
-        include = JsonTypeInfo.As.EXISTING_PROPERTY,
-        property = "{discriminatorField}",
-        defaultImpl = {Parent}.class,
-        visible = true)
-@JsonSubTypes({
-    @Type(value = {ChildA}.class, name = "{childAValue}"),
-    @Type(value = {ChildB}.class, name = "{childBValue}")
-})
-@JsonInclude(Include.ALWAYS)
-public class {Parent} { ... }
-```
-
-Each child's no-arg constructor sets the discriminator, and its `Builder` initializes the same field —
-so you never set it by hand. `include = EXISTING_PROPERTY` with `visible = true` means the discriminator
-is also a normal readable property on the model.
+The base carries `@JsonTypeInfo`/`@JsonSubTypes` naming the discriminator field and each child. Each
+child's no-arg constructor and its `Builder` both set that field, so you never set it by hand, and
+because the discriminator is an `EXISTING_PROPERTY` it is also a normal readable property on the
+model.
 
 ## Date and time types
 

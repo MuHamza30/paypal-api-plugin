@@ -47,12 +47,9 @@ Notes:
   if `POST`/`PATCH`/`DELETE` are absent their failures surface with no retry. Add one only when the
   operation really is idempotent.
 
-  One exception, and it is the safe kind: the transport is `urllib3`'s `Retry`, which classes a
-  **connect-phase** failure separately and retries it without checking the method list — on the
-  reasoning that a connection that was never established cannot have delivered the request. So a
-  connect timeout on a `POST` may be retried even with `POST` absent; a *read* timeout on the same
-  `POST` will not be, which is the case that could duplicate a write. Worth knowing before you read a
-  retry count in a log and conclude the list is not being honoured.
+  One exception: a failure in the **connect phase** is retried without checking the method list, so a
+  connect timeout on a `POST` may be retried even with `POST` absent. A *read* timeout on the same
+  `POST` will not be — that is the case that could duplicate a write.
 - **Only the statuses in `retry_statuses` are retried**; everything else raises immediately.
 - **`timeout` is handed to the transport per request** (`RequestsClient(timeout=self.timeout, ...)` in
   `Configuration.create_http_client`) — it is not a deadline over the whole call including retries. If
@@ -60,11 +57,9 @@ Notes:
 - There is **no per-call timeout or cancellation argument**; a call that needs a different budget needs
   a differently-configured client. `client.config.clone_with(timeout=5)` plus a new client is the
   cheapest way to get one.
-- **Retries are off unless this build turned them on — check, do not assume either way.** The count is
-  the `Retries` code-generation setting baked into `Configuration.__init__`: `0` in a default build,
-  but specs do raise it. **Read the `max_retries=` default in `paypalserversdk/configuration.py` before
-  you reason about resilience.** At `0` a transient `503` raises on the first attempt and passing
-  `max_retries=0` is a no-op; above `0` every listed status and method is retried underneath your code
+- **Read the `max_retries=` default in `paypalserversdk/configuration.py`** — it is written in when the
+  SDK is generated, so it varies per build. At `0` a transient `503` raises on the first attempt and
+  passing `max_retries=0` is a no-op; above `0` every listed status and method is retried underneath your code
   whether you wanted it or not. Raise it only where nothing above the SDK already retries — a task
   queue, a job runner, a failover wrapper, or your own orchestration loop. Retry layers multiply rather
   than add: `max_retries=3` is **four** requests per attempt, so inside a 3-attempt job it is twelve
@@ -74,17 +69,30 @@ Notes:
   the old value — as does `clone_with(timeout=0)` or an empty `retry_statuses`. Build a fresh client
   instead.
 
+> **A call that fetches a token spends `timeout` twice.** This applies to an SDK secured by an OAuth
+> grant — check `paypalserversdk/http/auth/` for an OAuth module; if there is none, skip this.
+>
+> An operation whose cached token is missing or expired fetches one first, and that **token request**
+> shares the one `RequestsClient` — the OAuth controller is built from the same `Configuration` — so it
+> is bounded by the same `timeout`. That budget is per request, so the operation can take up to **two**
+> full periods; size
+> any caller-side deadline against two, not one.
+>
+> **The failure is disguised.** A failed fetch hands back the previously held token (`None` on a first
+> call), and what you get is an `AuthValidationException` carrying the scheme's fixed `error_message` —
+> the same one a wrong client id produces, with the underlying exception gone rather than chained. To
+> tell "the provider is down" from "our credentials are wrong", call `fetch_token()` yourself at
+> startup, or set an OAuth token provider.
+
 ## Base URL / environment
 
 There is **no free-form base-URL argument**. The base URL is looked up in the
 `Configuration.environments` map by `(environment, server)` and returned by
 `Configuration.get_base_uri`, with any server parameters substituted into the URL template.
 
-Read `paypalserversdk/configuration.py` for the real names before naming one — they come from the
-spec's server list and vary per API. They are members of the `Environment` and `Server`
+Read `paypalserversdk/configuration.py` for the real names before naming one — they vary per API. They are members of the `Environment` and `Server`
 enums there.
-To point the SDK at a mock or proxy that no name covers, use `proxy_settings`, or the transport seam in
-**python-testing**.
+To point the SDK at a mock or proxy that no name covers, use `proxy_settings` (below).
 
 ## Proxy
 
@@ -129,17 +137,3 @@ client = PaypalServersdkClient(logging_configuration=LoggingConfiguration(
 
 `doc/logging-configuration.md` documents the fields — the logger, the level, and whether sensitive
 headers are masked; it carries no import line, so take the module path from above.
-
-### Verify on the wire (first run of any new integration)
-
-Log the first execution of any new call and inspect the output. A wrong environment, a leftover
-`{placeholder}` in a path, or a mis-serialized path segment produces no in-band signal; the only symptom
-is a runtime `404` or `422`.
-
-Checklist for the first logged request:
-1. the **verb** matches the operation;
-2. the **path** has no literal `{placeholder}` left unsubstituted;
-3. each **path-parameter segment** is the value the API expects;
-4. the query parameters you set actually appear in the query string.
-
-Turn it back down once verified.

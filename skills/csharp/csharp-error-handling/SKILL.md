@@ -1,13 +1,9 @@
 ---
 name: 'csharp-error-handling'
-description: 'Handle errors from an APIMatic-generated C# SDK — every error response throws `ApiException` from the SDK''s `Exceptions` namespace, or one of the per-status typed subclasses an operation registers in its `ErrorCase` chain; the status code is `ResponseCode`, the request/response pair is `HttpContext`, and the inherited `Message` is the SDK''s own reason string rather than the server''s `message` field. Use the moment you write a try/catch around a call on the PayPal Server SDK C# SDK, translate its errors into your own, or read a status code or an error body — load it even after reading the `ErrorCase` lines in the source, since they won''t tell you that a typed payload is silently left at its defaults when the error body is not the documented shape, or that a typed payload''s non-nullable fields are left at `0`/`false` rather than reported.'
+description: 'Handle errors from the PayPal Server SDK C# SDK. Load before your first try/catch around a call, or when building an error-translation layer. The thrown type won''t tell you the status code is on `ResponseCode`, which failures never arrive as an `ApiException` at all, or that a Polly timeout does not derive from `OperationCanceledException`.'
 ---
 
 # Error handling for an APIMatic C# SDK
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{Controller}`, `{operation}`, `{Typed}Exception`) — replace it with the concrete identifier from
-> the source.
 
 Every error the API reports arrives as **`PaypalServerSdk.Standard.Exceptions.ApiException`** or a subclass
 of it, so one `catch (ApiException)` catches every *thrown* failure.
@@ -44,7 +40,7 @@ alternative.** The controller base class may hold a static `GlobalErrors` dictio
 the controller *including* operations that also have their own `ResponseHandler`, so an operation's own
 map is not the whole story.
 
-To settle it for an SDK, open the base class in the controller folder (its name is a generator setting)
+To settle it for an SDK, open the base class in the controller folder (its name varies per SDK)
 and look for a `GlobalErrors` member — do **not** rely on grepping the folder for `ErrorCase`, because the
 base class declares a `CreateErrorCase` helper in every generated SDK and so always matches. Three
 distinct shapes exist:
@@ -125,8 +121,8 @@ catch ({Typed}Exception e)
 }
 ```
 
-This SDK does **not** set `CSharpResolveExceptionPropertyCollisions`, so there is **no `*Property`
-member**: a colliding field is declared `public new string Message`, shadowing the inherited one. Read
+This SDK has **no `*Property` member**: a colliding field is declared `public new string Message`,
+shadowing the inherited one. Read
 it through a `{Typed}Exception` variable for the API's text, and through an `ApiException` variable for
 the SDK's reason string.
 
@@ -168,7 +164,7 @@ declaring type, so `"value"` emits as `MValue` (**csharp-models**).
 > typed exception. One caveat before you write a test for the enum row: an SDK that declares **no enums**
 > cannot produce it either. `Newtonsoft.Json` is reachable from a consumer
 > with no explicit `PackageReference` — it comes in transitively. Treat hitting the arm as "the server sent
-> something the spec does not describe", and regenerate the SDK if the shape is legitimate.
+> something this SDK does not model".
 
 ## Where the exception surfaces
 
@@ -183,8 +179,8 @@ exception is the only signal there is.
   failure and TLS errors surface from `System.Net.Http` as `HttpRequestException`, a timeout or a
   cancelled `CancellationToken` as a cancellation exception.
 - **A breach of `MaximumRetryWaitTime` is `Polly.Timeout.TimeoutRejectedException`, and it is not a
-  cancellation.** That setting sizes a timeout policy wrapping the whole call, so when it fires the
-  exception comes from Polly, not from `System.Threading`. It does **not** derive from
+  cancellation.** When it fires, the exception comes from Polly, not from
+  `System.Threading`. It does **not** derive from
   `OperationCanceledException`, so a catch ladder written for cancellation misses it and the call
   escapes as an unhandled exception — a stalled provider then surfaces to your caller as a bare `500`
   rather than the timeout you meant to return. Catch it by name, or catch broadly at the boundary. The
@@ -211,9 +207,8 @@ exception is the only signal there is.
 
 ## Notes
 
-- **Retries have already happened** by the time the exception reaches you, and only for the methods
-  and status codes the built client is configured with. Do not assume a `POST` was retried and do not
-  quote a retry count — read `client.HttpClientConfiguration` (**csharp-configuration-resilience**).
+- **Retries have already happened** by the time the exception reaches you — read
+  `client.HttpClientConfiguration` for what this client retries (**csharp-configuration-resilience**).
 - **Do not log `HttpContext.Request` wholesale.** Per `doc/http-request.md` it exposes `Username` and
   `Password` alongside `Headers` and `Body`; log `QueryUrl`, `HttpMethod` and the status instead.
 - **Do not leak SDK exception types across your own API boundary.** Translate them in one place,

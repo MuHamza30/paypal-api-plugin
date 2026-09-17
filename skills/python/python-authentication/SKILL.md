@@ -19,22 +19,13 @@ the object and pass it in when constructing the client (see `python-client-initi
 > scheme is not this case** — those are ordinary API-key schemes with a credentials class and a
 > `doc/auth/` page. Check the scheme's module for a credentials class before writing the call.
 
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{basic_auth_credentials}`, `{controller}`) — replace it with the concrete identifier from the source.
-
 > **Every identifier in this skill is a placeholder — none of these snippets will import as written.**
-> Auth module names, class names, constructor arguments and client kwargs are all generated from the
-> scheme as *your* spec declares it, so they differ between SDKs: one has `api_key.py`/
-> `ApiKeyCredentials`, another `api_key_header.py`/`ApiKeyHeaderCredentials`. **OAuth has one rule, and
-> it is about how many schemes the API declares, not about casing:** when OAuth 2 is the *only* scheme,
-> the generator overrides the module to `o_auth_2.py` and the handler class to `OAuth2` whatever the
-> spec named the scheme, and names the credentials class for the grant (e.g.
-> `ClientCredentialsAuthCredentials`). In a **multi-scheme** SDK there is no override — module and
-> classes are snake/Pascal-cased straight from the scheme's own name, so the casing is whatever the spec
-> wrote. The client's auth-manager property is snake_cased from the scheme *key*, which is a third name
-> again: `client.oauth_2` sitting alongside `o_auth_2.py` is normal. `ls paypalserversdk/http/auth/`
-> rather than guessing any of them. The snippets below show the **shape**: a credentials object you
-> construct and pass as its own kwarg.
+> Auth module names, class names, constructor arguments and client kwargs all differ between SDKs: one
+> has `api_key.py`/`ApiKeyCredentials`, another `api_key_header.py`/`ApiKeyHeaderCredentials`, and the
+> module, the credentials class and the client's auth-manager property can be three different spellings
+> of the same scheme — `client.oauth_2` sitting alongside `o_auth_2.py` is normal. **`ls
+> paypalserversdk/http/auth/` rather than guessing any of them.** The snippets below show the **shape**:
+> a credentials object you construct and pass as its own kwarg.
 >
 > **Get the real names from two places, before you write any auth code:** the `*_credentials`
 > parameters on `Configuration.__init__` in `paypalserversdk/configuration.py`, and the scheme's page
@@ -103,7 +94,19 @@ the token across restarts, or to hand the SDK a token you already hold, pass the
 `o_auth_on_token_update` and `o_auth_token_provider` callbacks. They are **constructor arguments of the
 credentials class**, not parameters of the client or `Configuration` — reading
 `Configuration.__init__` will not show them — and they keep those exact names whatever the scheme is
-called. See [reference.md](reference.md).
+called. See [reference.md](reference.md) for the other grants.
+
+> **Do not compute `expiry` yourself.** The SDK compares it against a clock that is the host's *local*
+> time read as if it were UTC, so it is displaced from the real epoch by the host's UTC offset. A token
+> the SDK fetched and checks in one process is self-consistent — it stamps and compares with the same
+> clock — but an `expiry` you derive from a correct UTC epoch is judged against a skewed one, and a
+> token restored on a host whose offset differs from the one that saved it is judged against the
+> difference between them. Erring early wastes a refresh; erring late hands an expired token to the API
+> and surfaces as a `401` your own bookkeeping said could not happen.
+>
+> So let the SDK stamp `expiry`: pass a token you received from it back unchanged, and use
+> `oAuthOnTokenUpdate` to persist whatever it hands you rather than constructing the value. Treat a
+> token restored across timezones as unreliable.
 
 ## More schemes
 
@@ -123,6 +126,5 @@ authentication**, **multiple schemes**, and reading credentials from the environ
   object (or call `clone_with(...)` on the existing one), pass it through
   `client.config.clone_with(...)`, and construct a new client from that configuration — mutating the
   live client does not work.
-- Keep secrets out of source. Read them from environment variables or a secrets manager, never
-  hardcode them. Each credentials class also has a `from_environment()` classmethod that builds it from
-  a fixed set of `UPPER_SNAKE` variables — see [reference.md](reference.md).
+- Each credentials class has a `from_environment()` classmethod that builds it from a fixed set of
+  `UPPER_SNAKE` variables — see [reference.md](reference.md).

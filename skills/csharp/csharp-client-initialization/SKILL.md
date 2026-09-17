@@ -1,12 +1,12 @@
 ---
 name: 'csharp-client-initialization'
-description: 'Construct and configure an APIMatic-generated C# SDK client — the client is `sealed` with a private constructor, so you go through its nested `new PaypalServerSdkClient.Builder()`, set transport options through a `.HttpClientConfig(config => ...)` action rather than a config object, hand the credential setters a **built** `{Scheme}Model`, pick the base URL with an `Environment` enum member (there is no base-URL override), reach controllers through get-only properties, and bind an `IConfiguration` section with `FromConfiguration`. Use the moment you build the PayPal Server SDK C# SDK client, pick an environment, or register it in a container — load it even after reading the client class in the source, since its members won''t tell you that `doc/client.md` advertises builder methods that do not exist, that `Build()` silently drops incomplete credentials, or that `ToBuilder()` drops the HTTP client configuration.'
+description: 'Construct and configure the PayPal Server SDK C# SDK client. Load before you call the builder or wire the client into an application. The method list won''t tell you the client is `sealed` with a nested `Builder` and no public constructor, that controllers are get-only properties rather than types you construct, or that one client is built once and reused.'
 ---
 
 # Initializing an APIMatic-generated C# SDK client
 
-This applies to **any** APIMatic-generated C# SDK (APIMATIC v3.0). Names carrying a token are concrete
-for this SDK; replace the `{...}` placeholders with the real names from its source:
+Names carrying a token are concrete for this SDK; replace the `{...}` placeholders with the real names
+from its source:
 
 - `{Controller}` — a controller class in `PaypalServerSdk.Standard.Controllers`, and the client property for it.
 - `{MEMBER}` — a member of the `Environment` enum; `{SERVER}` — a member of the `Server` enum.
@@ -49,7 +49,7 @@ The `Builder` methods, in `PaypalServerSdkClient.cs` — **read that class for t
 | `HttpCallback(HttpCallback)` | an `HttpCallback` | observation only |
 | `Build()` / `static FromConfiguration(IConfigurationSection)` | — / a section | build; or a pre-populated `Builder` |
 
-This SDK was generated with `EnableLogging`, so the `Builder` also carries
+This SDK has built-in logging, so the `Builder` also carries
 `LoggingConfig()` and `LoggingConfig(Action<LogBuilder>)` — see **csharp-configuration-resilience**.
 
 > **`doc/client.md` advertises builder methods that do not exist.** Its *Builder Class* table lists
@@ -69,18 +69,18 @@ see **csharp-configuration-resilience**.
 ## Choosing the environment / base URL
 
 Environments are members of an `enum Environment` in `PaypalServerSdk.Standard` (`Environment.cs`). **Read the
-enum for the real member names before naming one** — they come from the API spec's server list, so there
+enum for the real member names before naming one** — there
 may be no `Production` at all. Match each member to the URL it resolves to in the environments map at
 the top of `PaypalServerSdkClient.cs`.
 
 ```csharp
 var client = new PaypalServerSdkClient.Builder()
     .Environment(Environment.{MEMBER})
-    .{ConfigVar}("...")                             // only if the spec declares configuration variables
+    .{ConfigVar}("...")                             // only where this SDK declares configuration variables
     .Build();
 
 string url = client.GetBaseUri();                   // default server of the selected environment
-string alt = client.GetBaseUri(Server.{SERVER});    // a named alias from Server.cs
+string alt = client.GetBaseUri(Server.{SERVER});
 ```
 
 **There is no base-URL override** — `GetBaseUri` is a getter only, and your only levers are
@@ -181,20 +181,12 @@ var other = client.ToBuilder()
 
 ## Dependency injection
 
-The client is immutable once built, so **singleton** is the right lifetime everywhere, and the SDK
-generates no DI extension method — there is no `IServiceCollection` anywhere in it:
-
-```csharp
-services.AddSingleton(_ => new PaypalServerSdkClient.Builder()
-    .Environment(Environment.{MEMBER})
-    .Build());
-```
-
-Qualify or alias `IConfiguration` in any file importing both `PaypalServerSdk.Standard` and
-`Microsoft.Extensions.Configuration` — each declares one, so the bare name is ambiguous.
-`PaypalServerSdkClient` is `sealed` and implements nothing covering its
+The client is immutable once built, so register it as a **singleton**; the SDK generates no DI extension
+method. Qualify or alias `IConfiguration` in any file importing both `PaypalServerSdk.Standard` and
+`Microsoft.Extensions.Configuration` — each declares one. `PaypalServerSdkClient` is `sealed` and implements nothing covering its
 operations, so inject a narrow interface of your own — that wrapper is also the seam your tests need
 (see **csharp-testing**).
+
 
 ## Next
 

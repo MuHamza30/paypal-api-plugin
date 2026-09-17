@@ -1,15 +1,14 @@
 ---
 name: 'java-client-initialization'
-description: 'Construct and configure an APIMatic-generated Java SDK client — the client has no public constructor, so you go through its nested `new {Api}Client.Builder()`, set transport options through a `.httpClientConfig(builder -> ...)` lambda rather than a config object, pick an `Environment` enum member, reach controllers with `client.get{Controller}()`, clone with `client.newBuilder()`, and call the **static** `{Api}Client.shutdown()` at process exit. Use the moment you build the PayPal Server SDK Java SDK client, pick an environment, or wire it into your application — load it even after reading the class in the source, since the members show the arguments but not the builder-only construction, the lambda-shaped transport config, or the lifetime rules.'
+description: 'Construct and configure the PayPal Server SDK Java SDK client. Load before you call the builder or wire the client into an application. The method list won''t tell you `httpClientConfig` takes a lambda rather than an object, that controllers are accessors on the client, or that a cloned client keeps some settings and drops others.'
 ---
 
 # Initializing an APIMatic-generated Java SDK client
 
-This applies to **any** APIMatic-generated Java SDK (APIMATIC v3.0). Replace the `{...}` placeholders
-below with the real names from the SDK source:
+Replace the `{...}` placeholders below with the real names from the SDK source:
 
 - `{Api}Client` — the single client class in the SDK's root package.
-- `{Controller}` — a controller class; its package and class suffix are generator settings, so take both
+- `{Controller}` — a controller class; its package and class suffix are both named per SDK, so take both
   from the `import` block of `{Api}Client.java`.
 
 ## The shape: a nested Builder, no public constructor
@@ -28,7 +27,7 @@ import {rootPackage}.Environment;
         .build();
 ```
 
-This build did not set `GenerateInterfaces`, so the class is declared `implements Configuration` and no
+This SDK ships no generated interfaces, so the class is declared `implements Configuration` and no
 client interface is generated — the concrete class is the only type you can inject.
 
 `Configuration` is a **read-only interface** the client implements — `getEnvironment()`,
@@ -69,12 +68,12 @@ in — you pass a `Consumer` that receives the builder and mutates it:
 Environments are members of an `enum Environment` in the SDK's root package. **Read the enum for the real
 member names before naming one.**
 
-Member names come from the API spec's server list, so do not assume a particular one exists — there may
+Do not assume a particular member exists — there may
 be no `PRODUCTION` at all. A name also does **not** imply a live host: match each member to the URL it
 actually resolves to in the private `environmentMapper` method of `{Api}Client.java`.
 
 The base URL is **derived** from the selected environment plus a `Server` enum member (and any server
-parameters the spec declares) — there is no free-form base-URL option. The default environment is
+parameters the spec declares). The default environment is
 whatever the `Builder`'s `environment` field is initialized to; read it rather than assume.
 
 ```java
@@ -88,7 +87,7 @@ String url2 = client.getBaseUri(Server.{MEMBER}); // for a named server
 
 Some SDKs expose server parameters (a port, a tenant id, a template variable) as extra `Builder`
 methods that feed the base-URL template. To point the SDK at a mock or a proxy that no `Environment`
-member covers, see **java-testing** — the seam is a custom OkHttp client, not a URL override.
+member covers, see **java-configuration-resilience**.
 
 ## Accessing controllers — accessors on the client
 
@@ -99,13 +98,13 @@ group, named `get` + the controller's class name:
 {Controller} controller = client.get{Controller}();
 ```
 
-The class name — and therefore the accessor — depends on generator settings: the group name plus a
+The class name — and therefore the accessor — is named per SDK: the group name plus a
 postfix that defaults to `Controller`, but which may be something else (`...Api`) or absent entirely.
 **Read the accessor names off `{Api}Client.java`, or off `doc/client.md`, rather than guessing.**
 Controllers are created once in the client constructor and returned by reference; they are stateless
 wrappers, so holding one is fine.
 
-Because this build did not set `GenerateInterfaces`, the accessor's declared type is the `final`
+Because this SDK ships no generated interfaces, the accessor's declared type is the `final`
 implementation class itself; there is no interface to hold instead.
 
 ## Cloning a configured client
@@ -144,25 +143,9 @@ affected only that client. It does not — prefer the class form.
 
 ## Dependency injection
 
-The client is immutable once built, so a singleton is the right scope everywhere.
-
-Spring: build it in a `@Configuration` class and expose it as a `@Bean`, with `destroyMethod` left off
-(shutdown is static, so a `@PreDestroy` on a separate component, or an explicit call at application
-shutdown, is clearer):
-
-```java
-@Bean
-public {Api}Client apiClient(@Value("${api.timeout:30}") long timeoutSeconds) {
-    return new {Api}Client.Builder()
-            .environment(Environment.{MEMBER})
-            .httpClientConfig(configBuilder -> configBuilder.timeout(timeoutSeconds))
-            .build();
-}
-```
-
-Without a container, hold it in a `static final` field on a small factory class, or pass it through
-constructors. Inject the `{Api}Client` (or a narrow interface of your own over the operations you use)
+The client is immutable once built, so a singleton is the right scope everywhere. Inject the `{Api}Client` (or a narrow interface of your own over the operations you use)
 rather than building one inside consumers.
+
 
 ## Next
 

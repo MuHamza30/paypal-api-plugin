@@ -1,6 +1,6 @@
 ---
 name: 'ruby-testing'
-description: 'Unit-test code that calls an APIMatic-generated Ruby SDK — the SDK ships no mocking helpers, so the in-process seam is the `connection:` keyword argument (a Faraday connection you build with Faraday''s test adapter), while `http_callback:` is the observation seam the SDK''s own generated Minitest suite uses to assert status codes, headers and raw bodies. Covers stubbing success and error responses, asserting the outgoing request, asserting the right typed exception per operation, disabling retries so a stubbed 5xx fails fast, and substituting a stub client in your app''s wiring. Use when writing, mocking or stubbing tests for calls made through the PayPal Server SDK Ruby SDK — load it even after reading the constructor in the source, since the keyword list won''t tell you which argument is the seam or that `http_callback` cannot stub a response.'
+description: 'Unit-test code that calls the PayPal Server SDK Ruby SDK. Load before stubbing the SDK. The argument list won''t tell you the seam is a `Faraday::Connection` you build yourself and pass as `connection:`, that `http_callback` observes rather than substitutes, or that a stubbed 5xx needs `max_retries: 0` to fail on the first attempt.'
 ---
 
 # Testing code that uses an APIMatic Ruby SDK
@@ -14,14 +14,7 @@ constructor exposes two relevant keyword arguments:
   **observe** the request and response. This is what the SDK's own generated tests use for assertions —
   it cannot stub anything.
 
-**Match the project's existing test stack — don't impose one.** When the SDK was generated with tests, its
-generated tests use Minitest and the gemspec adds `minitest` and `minitest-proveit` as development
-dependencies; otherwise the gemspec carries runtime dependencies only and there is no `test/` directory.
-Your application may use RSpec either way. Check the project first; the samples below use Minitest
-**purely for reference** — they show the seam and *what* to assert, not a mandated framework.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g.
-> `{controller_name}`, `{operation}`) — replace it with the concrete identifier from the source.
+The samples below use Minitest for reference only — mirror whatever the project already uses.
 
 ## A reusable stub helper
 
@@ -50,6 +43,33 @@ end
 
 Faraday's test adapter is Faraday's own API, not the SDK's — check the Faraday version the SDK's gems
 resolve to for the exact stub syntax, and use `stubs.verify_stubbed_calls` to assert every stub was hit.
+
+**A scheme that fetches a token sends that request through this same connection, so stub its path too.**
+The generated auth handler builds its own controller from the configuration it was given
+(`@_o_auth_api = OAuthAuthorizationController.new(config)` in `PaypalServerSdk/http/auth/`), which means
+the token call rides the `connection:` you just replaced — it does not bypass the seam. A helper that
+stubs only the operation's path therefore fails before the operation is reached, and **it does not fail
+with anything that names your test**: Faraday raises
+`Faraday::Adapter::Test::Stubs::NotFound`, and the handler's `rescue ApiException` does not catch it,
+because a Faraday stub miss is not an `ApiException`. So it propagates raw instead of turning into the
+handler's own `'... OAuthToken is undefined or expired.'` message. Supplying dummy credentials does not
+help; the request is still made.
+
+Stub the token path as well — with the **verb the token endpoint actually uses**, which is `post`, not
+the `get` the helper above registers. Read the real path off the generated OAuth authorization
+controller rather than assuming it, since it comes from the spec:
+
+```ruby
+stubs.post('{tokenPath}') do               # read the real path off the OAuth controller
+  [200, { 'Content-Type' => 'application/json' },
+   JSON.generate('access_token' => 'stub-token', 'token_type' => 'Bearer', 'expires_in' => 3600)]
+end
+```
+
+With both registered, the calls arrive in order — the token exchange first, then the operation — so
+anything you assert about "the request" has to select the one you mean rather than assume there was only
+one. The alternative is to seed a token on the credentials object so no fetch happens at all; see
+**ruby-authentication** for the field, and check how that SDK decides expiry before relying on it.
 
 ## Test a success path
 
@@ -164,6 +184,6 @@ from.
   **ruby-client-initialization**.
 - If the project already uses **WebMock** or **VCR**, stub at that level instead; the assertions above
   apply unchanged, and you keep one HTTP-stubbing mechanism across the suite.
-- The SDK's own `test/` directory (present only when the SDK was generated with tests) is a working
+- The SDK's own `test/` directory (present only in an SDK that ships tests) is a working
   reference: `test/http_response_catcher.rb` plus a Minitest base class that builds the client with
   `Client.from_env(..., http_callback: HttpResponseCatcher.new)`.

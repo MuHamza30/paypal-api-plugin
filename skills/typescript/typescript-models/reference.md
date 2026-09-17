@@ -24,7 +24,7 @@ export const {enumType}Schema: Schema<{EnumType}> = stringEnum({EnumType});
 Usage:
 
 ```typescript
-import { {EnumType} } from '@paypal/paypal-server-sdk';
+import { {EnumType} } from 'paypal-server-sdklib';
 
 const v: {EnumType} = {EnumType}.FirstValue;    // reference the member
 const raw: string = {EnumType}.FirstValue;      // string assignment works directly
@@ -70,5 +70,5 @@ object shape directly; see the union section in `SKILL.md` for the write-side pa
   carries an index signature `[key: string]: unknown` and the extras sit on the object itself, with no
   `additionalProperties` member — or `typedExpandoObject(schema, '<key>', <valueSchema>)`, which collects
   them under the member named by its second argument. Where the schema is a plain `object(...)`, unknown
-  fields are dropped on deserialization. Which form you get is fixed by the SDK's additional-properties
-  generator setting.
+  fields are dropped on deserialization. Which form you get varies per SDK — read the
+  model's schema.

@@ -1,6 +1,6 @@
 ---
 name: 'java-models'
-description: 'Construct and read the non-obvious model shapes of an APIMatic-generated Java SDK — the nested `Builder` (required fields in its constructor, optional ones as fluent setters), nullable-optional fields wrapped in `OptionalNullable<T>` with an extra `unset{Field}()`, enums converted with `fromString`/`fromInteger` rather than `valueOf`, oneOf/anyOf containers under `models/containers` built with static `from{Variant}(...)` factories and unwrapped with `match(...)`, `LocalDate`/`LocalDateTime`/`ZonedDateTime` date types, and Jackson-discriminated polymorphic hierarchies. Use when building a request body or reading a response field of the PayPal Server SDK Java SDK that is a union, enum, list/map, date or nullable-optional — anything that isn''t a plain String or number. Load it even after reading the field''s Java type in the source, since the type name alone won''t tell you that `valueOf` resolves the wrong thing, or that a union needs a static factory rather than a constructor.'
+description: 'Work with models from the PayPal Server SDK Java SDK. Load before building a request payload or mapping a response onto your own types. The class won''t tell you whether models are mutable or builder-only, which annotation argument is the wire name, how a oneOf/anyOf container is matched, or that you never set a discriminator yourself.'
 ---
 
 # Working with models in an APIMatic Java SDK
@@ -9,9 +9,6 @@ Most request/response data are plain generated classes with a nested `Builder` (
 `java-calling-endpoints`). This skill covers the **non-obvious model shapes** that trip integrations up.
 The patterns are generic across APIMatic Java SDKs; take the real type names from your SDK source under
 `<root>/models/`.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Model}`,
-> `{Union}`, `{Variant}`, `{EnumType}`) — replace it with the concrete identifier from the source.
 
 ## The Builder split: required vs optional
 
@@ -35,7 +32,7 @@ A model with **no** required fields has no `Builder` constructor arguments at al
 `new {Model}.Builder()`. A model that extends another names its clone method after itself
 (`to{Model}Builder()`) instead of `toBuilder()`.
 
-**This SDK was generated without immutable models**, so each field also has a plain `@JsonSetter` setter
+**This SDK's models are mutable**, so each field also has a plain `@JsonSetter` setter
 and the model has a no-arg constructor alongside the public all-args one. A model with required fields
 additionally gets a **no-arg `Builder()` overload**, so `new {Model}.Builder()` compiles even there and
 the required values can be supplied with the fluent setters instead — the `Builder` constructor is the

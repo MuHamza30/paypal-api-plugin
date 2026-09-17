@@ -1,13 +1,11 @@
 ---
 name: 'typescript-models'
-description: 'Construct and read the non-obvious model shapes of an APIMatic-generated TypeScript/Node.js SDK — oneOf/anyOf union types (built as plain object literals, narrowed on the way back with the generated is{Variant} type guards), TypeScript `enum` declarations (reference the member, never a bare string), collections (Array<T>), date/time fields that are plain strings the SDK neither converts nor format-checks, and unknown-field behavior. Use when building a request body or reading a response field of the PayPal Server SDK TypeScript SDK that is a union, enum, list/map, or date — anything that isn''t a plain string/number — or when an unmodeled JSON field is dropped on deserialization. Load it even after reading the field''s type in the source, since the type name alone won''t tell you that a union is validated at call time and rejects a value matching more than one variant.'
+description: 'Work with models from the PayPal Server SDK TypeScript SDK. Load before building a request payload or mapping a response onto your own types. The interface won''t tell you each model has a paired runtime schema, how unions are read back, that date fields are plain strings, or where unknown JSON survives.'
 ---
 
 # Working with models in an APIMatic TypeScript SDK
 
 Most request/response data are plain TypeScript objects conforming to interfaces (covered in `typescript-calling-endpoints`). This skill covers the **non-obvious model shapes** that trip integrations up. The patterns are generic across APIMatic TypeScript SDKs; take the real type names from your SDK source.
-
-> Throughout this skill, `{...}` is a placeholder for a name you take from your SDK (e.g. `{Union}`, `{Variant}`, `{EnumType}`, `{RequestType}`) — replace it with the concrete identifier from the source.
 
 ## Union types (oneOf / anyOf)
 
@@ -38,7 +36,7 @@ const body: {RequestType} = {
 The union's namespace exports one `is{Variant}` guard per variant. These are **read-side only**:
 
 ```typescript
-import { {Union} } from '@paypal/paypal-server-sdk';
+import { {Union} } from 'paypal-server-sdklib';
 
 if ({Union}.is{Variant}(response.result.{field})) {
   // narrowed to {Variant}
@@ -103,7 +101,7 @@ Enums are TypeScript `enum` declarations exported from the SDK (member = wire va
 member — never a bare string literal:
 
 ```typescript
-import { {EnumType} } from '@paypal/paypal-server-sdk';
+import { {EnumType} } from 'paypal-server-sdklib';
 
 request.{enumProp} = {EnumType}.SomeConstant;
 ```
@@ -113,14 +111,13 @@ own code needs no conversion. There is **no raw-string escape hatch**: `'value' 
 compile (TS2352, the types do not overlap), and even forced through with
 `'value' as unknown as {EnumType}` the runtime schema rejects it before any HTTP request —
 `stringEnum(X)` accepts declared members only. Unknown values are tolerated only when the enum's own file
-builds its schema as `stringEnum(X, true)`, which the generator emits solely for specs that mark the enum
-as accepting additional values.
+builds its schema as `stringEnum(X, true)` — the form used where the enum accepts additional values.
 
 See [reference.md](reference.md) for the full enum declaration shape.
 
 ## Unknown / future fields
 
-Whether unknown response fields survive depends on the SDK's additional-properties generator setting.
+Whether unknown response fields survive varies per SDK.
 The discovery signal is the model's own file — its schema call, and the interface beside it:
 
 - **`expandoObject({...})`**, paired with an index signature **`[key: string]: unknown`** on the
