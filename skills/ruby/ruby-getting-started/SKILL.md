@@ -24,8 +24,8 @@ models, error handling, retries, testing), see the companion API-agnostic skills
 | --- | --- |
 | API | `PayPal Server SDK` |
 | Runtime dependencies | `apimatic_core_interfaces`, `apimatic_core`, `apimatic_faraday_client_adapter` — read the `add_dependency` lines in `paypal_server_sdk.gemspec` for the pinned versions |
-| Gem id | `paypal_server_sdk` (version `2.29.0`) — `s.name` / `s.version` in `paypal_server_sdk.gemspec` |
-| Install | `cd path/to/paypal_server_sdk && rake install` |
+| Gem id | `paypal-server-sdk` (version `2.4.0`) — `s.name` / `s.version` in `paypal_server_sdk.gemspec` |
+| Install | `gem install paypal-server-sdk` |
 | Require | `require 'paypal_server_sdk'` — loads `lib/paypal_server_sdk.rb`, which requires everything else |
 | Module | everything lives under `PaypalServerSdk` |
 | Client | a single `PaypalServerSdk::Client` class, constructed with **keyword arguments**: `Client.new(timeout: 30, ...)` |
@@ -76,13 +76,13 @@ generated file tells you the name, the gem holds the behaviour.
 This SDK is published out of `https://github.com/paypal/PayPal-Ruby-Server-SDK`, branch `main` — take that branch explicitly rather than the repository default, which is not necessarily where this SDK is released from. Which registry that pipeline pushes to is a property of the pipeline rather than of the SDK. Try the install command below as-is first: if it resolves, the package is on the public registry and there is nothing further to configure. Only if it 404s do you need the feed — take it from the repository's publish workflow, or from whoever owns the pipeline, and configure that registry before retrying.
 
 ```bash
-cd path/to/paypal_server_sdk && rake install
+gem install paypal-server-sdk
 ```
 
 In a Bundler project, add it to the `Gemfile` instead of installing it globally:
 
 ```ruby
-gem 'paypal_server_sdk', '2.29.0'
+gem 'paypal-server-sdk', '2.4.0'
 ```
 
 That line still expects the gem to resolve from a source. For the common unpublished case — an SDK
@@ -90,14 +90,14 @@ handed over as a directory — point Bundler at the directory itself and skip th
 entirely:
 
 ```ruby
-gem 'paypal_server_sdk', path: 'vendor/paypal_server_sdk'
+gem 'paypal-server-sdk', path: 'vendor/paypal_server_sdk'
 ```
 
 A rebuilt SDK carries a new version, and an already-installed gem stays selected until something asks
 for the new one, so confirm what resolved:
 
 ```bash
-gem list paypal_server_sdk --details
+gem list paypal-server-sdk --details
 ```
 
 Then load it:
@@ -122,13 +122,13 @@ Clone it and read the clone — it is the source this pack documents:
 git clone --filter=blob:none --branch main https://github.com/paypal/PayPal-Ruby-Server-SDK
 ```
 
-**The clone is a branch; your install is pinned.** Check out the tag matching the version you installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
+**The clone is a branch; your install is pinned.** Check out the tag matching `2.4.0`, the version installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
 
 An existing copy, if you already have one, is in whichever of these applies:
 
 - the **unpacked SDK directory** you were given (the one containing the `.gemspec` and `lib/`); or
 - the **installed gem** — `gem which paypal_server_sdk` prints the path of `lib/paypal_server_sdk.rb`, and
-  `bundle show paypal_server_sdk` prints the gem root in a Bundler project.
+  `bundle show paypal-server-sdk` prints the gem root in a Bundler project.
 
 Treat it as a read-only reference and grep it locally.
 
@@ -154,7 +154,7 @@ Layout — grep here first:
   `doc/environment-based-client-initialization.md`. In the repository, it is the fastest way to find
   an operation, its parameters and its errors, then open the `.rb` file for the exact signature.
   **It is not in the installed gem** — a gem ships only what its gemspec's `files` list names, and
-  the generated docs are not in it, so the root `bundle show paypal_server_sdk` prints holds the
+  the generated docs are not in it, so the root `bundle show paypal-server-sdk` prints holds the
   library and little else. With only the gem, `lib/paypal_server_sdk/controllers/` is the equivalent
   starting point.
 - `bin/console` — a preconfigured IRB session that loads the SDK from `lib/`. Run `ruby bin/console` from
@@ -185,3 +185,17 @@ resolve each one from this SDK's source before you write code. Anything already 
 | `{placeholder}` | a stand-in value in an example | nothing to look up — substitute your own |
 
 Any other `{...}` you meet is a local example; the sentence around it says what belongs there.
+
+## Integration workflow — load the companion skill at each step
+
+**Load the skill named for a step before you write that step's code, even where you have already read
+the source.** The generated source is authoritative for the SDK's *surface*; these skills carry the
+usage rules a signature cannot show, and each one names the trap that surface hides.
+
+1. **ruby-client-initialization** — before you construct the client.
+2. **ruby-authentication** — before you set credentials, and when a call returns 401 or 403.
+3. **ruby-calling-endpoints** — before the first operation call.
+4. **ruby-models** — as soon as a request or response field is not a plain string or number.
+5. **ruby-error-handling** — before your first `begin`/`rescue` around a call.
+6. **ruby-configuration-resilience** — before you touch retries, timeouts, transport or the environment.
+7. **ruby-testing** — before you stub the SDK.

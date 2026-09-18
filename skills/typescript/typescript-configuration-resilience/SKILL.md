@@ -10,7 +10,7 @@ All configuration is passed at construction time in the single `Configuration` o
 not top level.
 
 ```typescript
-import { Client, Environment } from 'paypal-server-sdklib';
+import { Client, Environment } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   environment: Environment.{Name},
@@ -143,7 +143,7 @@ asked for.
 are exported from the package root. Configure it directly — there is no need to wrap the transport:
 
 ```typescript
-import { Client, LogLevel } from 'paypal-server-sdklib';
+import { Client, LogLevel } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   logging: {

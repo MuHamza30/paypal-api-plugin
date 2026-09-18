@@ -25,8 +25,8 @@ handling, retries, testing), see the companion API-agnostic skills: `typescript-
 | --- | --- |
 | API | `PayPal Server SDK` |
 | Runtime dependencies | always `@apimatic/core`, `@apimatic/schema`, `@apimatic/axios-client-adapter`, `@apimatic/authentication-adapters` and `tslib`; plus feature-gated ones — `@apimatic/oauth-adapters` (OAuth), `@apimatic/pagination` (paginated endpoints), `@apimatic/sse` (`text/event-stream` endpoints), `@apimatic/xml-adapter` (XML APIs). **`package.json` `dependencies` is authoritative — read it rather than assuming this list is complete.** |
-| npm package id | `paypal-server-sdklib` (version `2.29.0`) — the `"name"` in `package.json` |
-| Install | `npm install "git+https://github.com/paypal/PayPal-TypeScript-Server-SDK#main"` |
+| npm package id | `@paypal/paypal-server-sdk` (version `2.5.0`) — the `"name"` in `package.json` |
+| Install | `npm install @paypal/paypal-server-sdk` |
 | Client | a single exported `Client` class, constructed with `new Client(config?: Partial<Configuration>)` |
 | Configuration | a plain `Configuration` **options object** (interface in `src/configuration.ts`), passed to the constructor; all fields optional via `Partial` |
 | Auth | **this API declares at least one scheme**, so the `Configuration` carries one nested credential **object** per scheme, named `...Credentials` — **read the property name off `src/configuration.ts`; do not derive it from the scheme name in the spec.** The generator often names it after the auth *type* instead (a scheme named `APIKeyHeader` becomes `customHeaderAuthenticationCredentials`), and only sometimes after the scheme (`basicAuth` → `basicAuthCredentials`). Set it as an object literal; a deprecated top-level bare-string field may also exist alongside it. See **typescript-authentication** |
@@ -66,7 +66,7 @@ APIMatic TypeScript SDKs live under `src/`, with everything re-exported from `sr
 This SDK is published out of `https://github.com/paypal/PayPal-TypeScript-Server-SDK`, branch `main` — take that branch explicitly rather than the repository default, which is not necessarily where this SDK is released from. Which registry that pipeline pushes to is a property of the pipeline rather than of the SDK. Try the install command below as-is first: if it resolves, the package is on the public registry and there is nothing further to configure. Only if it 404s do you need the feed — take it from the repository's publish workflow, or from whoever owns the pipeline, and configure that registry before retrying.
 
 ```bash
-npm install "git+https://github.com/paypal/PayPal-TypeScript-Server-SDK#main"
+npm install @paypal/paypal-server-sdk
 ```
 
 It lands in `package.json` as an ordinary dependency. Pin the exact version:
@@ -75,7 +75,7 @@ saying so.
 
 ```json
 "dependencies": {
-  "paypal-server-sdklib": "2.29.0"
+  "@paypal/paypal-server-sdk": "2.5.0"
 }
 ```
 
@@ -83,13 +83,13 @@ Confirm what actually resolved — npm keeps serving the copy already in `node_m
 for the new version by name:
 
 ```bash
-npm ls paypal-server-sdklib
+npm ls @paypal/paypal-server-sdk
 ```
 
 ```ts
-import { Client, Environment, ApiError } from 'paypal-server-sdklib';
+import { Client, Environment, ApiError } from '@paypal/paypal-server-sdk';
 // controllers and model types are also exported from the package root:
-import { {Controller} } from 'paypal-server-sdklib';
+import { {Controller} } from '@paypal/paypal-server-sdk';
 ```
 
 Everything public is re-exported from `src/index.ts`, so import names come from the **package root** — you
@@ -100,13 +100,13 @@ don't import from subpaths. `npm install` pulls the `@apimatic/*` runtime packag
 > types** (a union base other models extend), and `export type { X }` for every other model. So a plain
 > model interface exists only at compile time, while an enum or a union base is a real runtime binding.
 >
-> That matters because a single `import { A, B } from 'paypal-server-sdklib'` mixing the two **fails under
+> That matters because a single `import { A, B } from '@paypal/paypal-server-sdk'` mixing the two **fails under
 > `isolatedModules` or `verbatimModuleSyntax`** — increasingly the default — and the error names the
 > type-only import rather than explaining the rule. Split it:
 >
 > ```ts
-> import { {EnumOrUnionBase} } from 'paypal-server-sdklib';        // value: usable at runtime
-> import type { {Model} } from 'paypal-server-sdklib';             // type only
+> import { {EnumOrUnionBase} } from '@paypal/paypal-server-sdk';        // value: usable at runtime
+> import type { {Model} } from '@paypal/paypal-server-sdk';             // type only
 > ```
 >
 > **Read `src/index.ts` to see which kind a name is** — grep it for the name and look at whether its
@@ -123,12 +123,12 @@ Clone it and read the clone — it is the source this pack documents:
 git clone --filter=blob:none --branch main https://github.com/paypal/PayPal-TypeScript-Server-SDK
 ```
 
-**The clone is a branch; your install is pinned.** Check out the tag matching the version you installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
+**The clone is a branch; your install is pinned.** Check out the tag matching `2.5.0`, the version installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
 
 An existing copy, if you already have one, is in whichever of these applies:
 
 - the **unpacked SDK directory** you were given (the one containing `package.json` and `src/`); or
-- **`node_modules/paypal-server-sdklib/`** in your project, once installed.
+- **`node_modules/@paypal/paypal-server-sdk/`** in your project, once installed.
 
 Treat it as a read-only reference and grep it locally.
 
@@ -148,7 +148,7 @@ Layout — grep here first:
   `doc/configuration-based-client-initialization.md`. In the repository it is the fastest way to find
   an operation, its parameters and a copy-pasteable snippet, then open the `.ts` file for the exact
   signature. **It is not in the installed package** — everything else listed above ships in
-  `node_modules/paypal-server-sdklib/`; `doc/` does not, because npm publishes only what the `files`
+  `node_modules/@paypal/paypal-server-sdk/`; `doc/` does not, because npm publishes only what the `files`
   field names. With only the package, `src/controllers/*.ts` is the equivalent starting point.
 
 ## Placeholder legend
@@ -177,3 +177,17 @@ look up.
 | `{id}`, `{placeholder}` | a stand-in value in an example | nothing to look up — substitute your own |
 
 Any other `{...}` you meet is a local example; the sentence around it says what belongs there.
+
+## Integration workflow — load the companion skill at each step
+
+**Load the skill named for a step before you write that step's code, even where you have already read
+the source.** The generated source is authoritative for the SDK's *surface*; these skills carry the
+usage rules a signature cannot show, and each one names the trap that surface hides.
+
+1. **typescript-client-initialization** — before you construct the client.
+2. **typescript-authentication** — before you set credentials, and when a call returns 401 or 403.
+3. **typescript-calling-endpoints** — before the first operation call.
+4. **typescript-models** — as soon as a request or response field is not a plain string or number.
+5. **typescript-error-handling** — before your first `try`/`catch` around a call.
+6. **typescript-configuration-resilience** — before you touch retries, timeouts, transport or the environment.
+7. **typescript-testing** — before you stub the SDK.

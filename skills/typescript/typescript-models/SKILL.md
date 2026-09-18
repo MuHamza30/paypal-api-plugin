@@ -36,7 +36,7 @@ const body: {RequestType} = {
 The union's namespace exports one `is{Variant}` guard per variant. These are **read-side only**:
 
 ```typescript
-import { {Union} } from 'paypal-server-sdklib';
+import { {Union} } from '@paypal/paypal-server-sdk';
 
 if ({Union}.is{Variant}(response.result.{field})) {
   // narrowed to {Variant}
@@ -101,7 +101,7 @@ Enums are TypeScript `enum` declarations exported from the SDK (member = wire va
 member — never a bare string literal:
 
 ```typescript
-import { {EnumType} } from 'paypal-server-sdklib';
+import { {EnumType} } from '@paypal/paypal-server-sdk';
 
 request.{enumProp} = {EnumType}.SomeConstant;
 ```

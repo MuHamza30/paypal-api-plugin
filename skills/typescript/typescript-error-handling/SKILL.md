@@ -59,7 +59,7 @@ inherited `err.result`, not on `err` directly.
 ### Case A — the status maps to a typed `{ErrorModel}Error`
 
 ```typescript
-import { Client, ApiError, {ErrorModel}Error } from 'paypal-server-sdklib';
+import { Client, ApiError, {ErrorModel}Error } from '@paypal/paypal-server-sdk';
 
 try {
   const response = await api.{operation}(/* ... */);
@@ -79,7 +79,7 @@ try {
 ```
 
 `ApiError` and every generated error class are exported from the **package root** — there is no
-`paypal-server-sdklib/errors` subpath (`.` and `./metadata` are the only exported subpaths).
+`@paypal/paypal-server-sdk/errors` subpath (`.` and `./metadata` are the only exported subpaths).
 
 ### Case B — the status maps to no typed model
 
@@ -87,7 +87,7 @@ try {
 into `result` on this path, so `err.result` is `undefined` here.
 
 ```typescript
-import { ApiError } from 'paypal-server-sdklib';
+import { ApiError } from '@paypal/paypal-server-sdk';
 
 try {
   const response = await api.{operation}(/* ... */);

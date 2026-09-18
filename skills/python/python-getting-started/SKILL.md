@@ -24,9 +24,9 @@ the companion API-agnostic skills: `python-client-initialization`, `python-authe
 | --- | --- |
 | API | `PayPal Server SDK` |
 | Runtime dependencies | `apimatic-core`, `apimatic-core-interfaces`, `apimatic-requests-client-adapter`, `python-dotenv` — see `dependencies` in `pyproject.toml` (mirrored in `requirements.txt`) |
-| pip distribution | `paypal_serversdk` (version `2.29.0`) — the `name` under `[project]` in `pyproject.toml` |
+| pip distribution | `paypal-server-sdk` (version `2.4.0`) — the `name` under `[project]` in `pyproject.toml` |
 | Import package | `paypalserversdk` — the top-level directory beside `pyproject.toml`; **not necessarily the same string as the pip distribution id** |
-| Install | `pip install "git+https://github.com/paypal/PayPal-Python-Server-SDK@main"` |
+| Install | `pip install paypal-server-sdk` |
 | Client | `PaypalServersdkClient` in `paypalserversdk/paypal_serversdk_client.py`, constructed with **keyword arguments** |
 | Configuration | a `Configuration` object in `paypalserversdk/configuration.py`; pass its fields as client kwargs, or build one and pass `config=` |
 | Auth | when the API declares a scheme: `{Scheme}Credentials` objects under `paypalserversdk/http/auth/`, passed as `{scheme}_credentials=` kwargs — **except custom *authentication***, the one scheme whose module holds a lone handler class with `auth_params = {}` and `TODO` markers and no credentials class (custom *header* and custom *query-parameter* schemes are ordinary API-key schemes and do get one). No `http/auth/` directory means no auth — see **python-authentication** |
@@ -81,7 +81,7 @@ Install into a **virtual environment**: the SDK pins `apimatic-core*` versions a
 fight whatever else is installed machine-wide.
 
 ```bash
-pip install "git+https://github.com/paypal/PayPal-Python-Server-SDK@main"
+pip install paypal-server-sdk
 ```
 
 If that points at a path rather than an index, it is because this SDK was not published — install from
@@ -92,13 +92,13 @@ Record it wherever the consuming project declares its dependencies — `requirem
 version and an unpinned entry moves the surface silently:
 
 ```
-paypal_serversdk==2.29.0
+paypal-server-sdk==2.4.0
 ```
 
 Confirm what resolved — pip treats an already-satisfied requirement as nothing to do:
 
 ```bash
-pip show paypal_serversdk
+pip show paypal-server-sdk
 ```
 
 ```python
@@ -122,7 +122,7 @@ Clone it and read the clone — it is the source this pack documents:
 git clone --filter=blob:none --branch main https://github.com/paypal/PayPal-Python-Server-SDK
 ```
 
-**The clone is a branch; your install is pinned.** Check out the tag matching the version you installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
+**The clone is a branch; your install is pinned.** Check out the tag matching `2.4.0`, the version installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
 
 An existing copy, if you already have one, is in whichever of these applies:
 
@@ -183,3 +183,17 @@ is yours to look up.
 | `{q}`, `{filter}`, `{placeholder}`, `{name}` | a stand-in value in an example | nothing to look up — substitute your own |
 
 Any other `{...}` you meet is a local example; the sentence around it says what belongs there.
+
+## Integration workflow — load the companion skill at each step
+
+**Load the skill named for a step before you write that step's code, even where you have already read
+the source.** The generated source is authoritative for the SDK's *surface*; these skills carry the
+usage rules a signature cannot show, and each one names the trap that surface hides.
+
+1. **python-client-initialization** — before you construct the client.
+2. **python-authentication** — before you set credentials, and when a call returns 401 or 403.
+3. **python-calling-endpoints** — before the first operation call.
+4. **python-models** — as soon as a request or response field is not a plain string or number.
+5. **python-error-handling** — before your first `try`/`except` around a call.
+6. **python-configuration-resilience** — before you touch retries, timeouts, transport or the environment.
+7. **python-testing** — before you stub the SDK.

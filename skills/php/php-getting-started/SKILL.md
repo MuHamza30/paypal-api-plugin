@@ -24,8 +24,8 @@ handling, resilience, testing), see the companion skills: `php-client-initializa
 | --- | --- |
 | API | `PayPal Server SDK` |
 | Runtime dependencies | `apimatic/core`, `apimatic/core-interfaces`, `apimatic/unirest-php`, plus the `json` and `curl` PHP extensions — see `composer.json` `require` |
-| Composer package | `apimatic-sdks/paypalserversdk` (SDK version `2.29.0`) — the `"name"` in `composer.json` |
-| Install | `composer config repositories.sdk-local '{"type":"path","url":"./libs/paypalserversdk","options":{"symlink":false}}' && composer require apimatic-sdks/paypalserversdk:@dev` |
+| Composer package | `paypal/paypal-server-sdk` (SDK version `2.4.0`) — the `"name"` in `composer.json` |
+| Install | `composer require paypal/paypal-server-sdk` |
 | PSR-4 root namespace | `PaypalServerSdkLib` → `src/` (`composer.json` `autoload.psr-4`) — **this, not the package name, is what `use` statements reference** |
 | PHP version | per `composer.json` `require.php` (these SDKs target `^7.2 \|\| ^8.0`) |
 | Client | one `{Client}` class per API namespace, built with `{Client}Builder::init()->…->build()` |
@@ -82,17 +82,17 @@ Everything lives under `src/`, mapped to `PaypalServerSdkLib\` by PSR-4. There i
 
 This SDK is published out of `https://github.com/paypal/PayPal-PHP-Server-SDK`, branch `main` — take that branch explicitly rather than the repository default, which is not necessarily where this SDK is released from. Which registry that pipeline pushes to is a property of the pipeline rather than of the SDK. Try the install command below as-is first: if it resolves, the package is on the public registry and there is nothing further to configure. Only if it 404s do you need the feed — take it from the repository's publish workflow, or from whoever owns the pipeline, and configure that registry before retrying.
 
-`apimatic-sdks/paypalserversdk` is the Composer package name; `PaypalServerSdkLib` is the PHP namespace. They are
+`paypal/paypal-server-sdk` is the Composer package name; `PaypalServerSdkLib` is the PHP namespace. They are
 different strings and both matter.
 
 The install command for this SDK is:
 
 ```bash
-composer config repositories.sdk-local '{"type":"path","url":"./libs/paypalserversdk","options":{"symlink":false}}' && composer require apimatic-sdks/paypalserversdk:@dev
+composer require paypal/paypal-server-sdk
 ```
 
 If the command above is a bare `composer require` and Composer answers `Could not find a matching
-version of package apimatic-sdks/paypalserversdk`, the SDK is **not on a registry** — you were handed an unpacked
+version of package paypal/paypal-server-sdk`, the SDK is **not on a registry** — you were handed an unpacked
 directory, which is the common case, and Composer reaches it through a **path repository** instead. The
 steps below are what the unpublished form of that command condenses into one line — register the
 directory as a path repository and require it at `:@dev`, since a local checkout carries no version tag.
@@ -100,7 +100,7 @@ directory as a path repository and require it at `:@dev`, since a local checkout
 Confirm what resolved:
 
 ```bash
-composer show apimatic-sdks/paypalserversdk
+composer show paypal/paypal-server-sdk
 ```
 
 Once the SDK *is* published it is pinned in `composer.json` like any other dependency — regenerating
@@ -108,7 +108,7 @@ publishes a new version, so pin rather than float:
 
 ```json
 "require": {
-    "apimatic-sdks/paypalserversdk": "2.29.0"
+    "paypal/paypal-server-sdk": "2.4.0"
 }
 ```
 
@@ -147,12 +147,12 @@ Clone it and read the clone — it is the source this pack documents:
 git clone --filter=blob:none --branch main https://github.com/paypal/PayPal-PHP-Server-SDK
 ```
 
-**The clone is a branch; your install is pinned.** Check out the tag matching the version you installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
+**The clone is a branch; your install is pinned.** Check out the tag matching `2.4.0`, the version installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
 
 An existing copy, if you already have one, is in whichever of these applies:
 
 - the **unpacked SDK directory** you were given (the one containing `composer.json` and `src/`); or
-- **`vendor/apimatic-sdks/paypalserversdk/`** in your project, once installed.
+- **`vendor/paypal/paypal-server-sdk/`** in your project, once installed.
 
 Treat it as a read-only reference and grep it locally.
 
@@ -202,3 +202,17 @@ yours to look up.
 | `{slug}`, `{ALIAS}`, `{LOCAL_CONSTANT}`, `{optionalParam}` | a stand-in value in an example | nothing to look up — substitute your own |
 
 Any other `{...}` you meet is a local example; the sentence around it says what belongs there.
+
+## Integration workflow — load the companion skill at each step
+
+**Load the skill named for a step before you write that step's code, even where you have already read
+the source.** The generated source is authoritative for the SDK's *surface*; these skills carry the
+usage rules a signature cannot show, and each one names the trap that surface hides.
+
+1. **php-client-initialization** — before you construct the client.
+2. **php-authentication** — before you set credentials, and when a call returns 401 or 403.
+3. **php-calling-endpoints** — before the first operation call.
+4. **php-models** — as soon as a request or response field is not a plain string or number.
+5. **php-error-handling** — before your first `try`/`catch` around a call.
+6. **php-configuration-resilience** — before you touch retries, timeouts, transport or the environment.
+7. **php-testing** — before you stub the SDK.

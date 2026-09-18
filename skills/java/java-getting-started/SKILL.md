@@ -24,7 +24,7 @@ handling, retries, testing), see the companion API-agnostic skills: `java-client
 | --- | --- |
 | API | `PayPal Server SDK` |
 | Runtime dependencies | `io.apimatic:core`, `io.apimatic:core-interfaces`, `io.apimatic:okhttp-client-adapter` (version ranges pinned in `pom.xml`); Jackson and OkHttp3 arrive transitively |
-| Maven coordinates | `com.paypal.sdk:paypal-server-sdk:2.29.0` — the `<groupId>`/`<artifactId>`/`<version>` in `pom.xml` |
+| Maven coordinates | `com.paypal.sdk:paypal-server-sdk:2.4.0` — the `<groupId>`/`<artifactId>`/`<version>` in `pom.xml` |
 | Client | a single `public final class {Api}Client`, built with `new {Api}Client.Builder()...build()` — there is **no public constructor**. This SDK ships no generated interfaces, so it is declared `implements Configuration` and no client interface is generated |
 | Configuration | `Configuration` is a **read-only interface** the client implements (`getEnvironment()`, `getHttpClientConfig()`, `getBaseUri()`), *not* an options object you pass in. Everything is set on the `Builder` |
 | Auth | **this API declares at least one security scheme**, so `<root>/authentication/` exists and the client builder carries a credential setter per scheme: a `{Scheme}Model` built with its own nested `Builder` and handed to `.{scheme}Credentials(model)` for most schemes, but an API whose **only** scheme is an OAuth 2 grant drops the suffix (`.clientCredentialsAuth(model)`, `.authorizationCodeAuth(model)`). This is **not** the no-auth case, so read the real setter names off `{Api}Client.java` rather than concluding there is none. See **java-authentication** |
@@ -73,21 +73,21 @@ The SDK is a Maven source project. Add it as a normal dependency:
 <dependency>
     <groupId>com.paypal.sdk</groupId>
     <artifactId>paypal-server-sdk</artifactId>
-    <version>2.29.0</version>
+    <version>2.4.0</version>
 </dependency>
 ```
 
 Gradle consumers use the same coordinates:
 
 ```groovy
-implementation 'com.paypal.sdk:paypal-server-sdk:2.29.0'
+implementation 'com.paypal.sdk:paypal-server-sdk:2.4.0'
 ```
 
 Then make the artifact resolvable the way this SDK was distributed:
 
 ```bash
 # Make the artifact resolvable, then build normally:
-mvn -f path/to/paypal-server-sdk/pom.xml install -Dmaven.test.skip=true -Dmaven.javadoc.skip=true
+mvn dependency:get -Dartifact=com.paypal.sdk:paypal-server-sdk:2.4.0
 ```
 
 A rebuilt SDK carries a new version, and a stale `<version>` in the consuming `pom.xml` keeps resolving
@@ -121,13 +121,13 @@ Clone it and read the clone — it is the source this pack documents:
 git clone --filter=blob:none --branch main https://github.com/paypal/PayPal-Java-Server-SDK
 ```
 
-**The clone is a branch; your install is pinned.** Check out the tag matching the version you installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
+**The clone is a branch; your install is pinned.** Check out the tag matching `2.4.0`, the version installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
 
 An existing copy, if you already have one, is in whichever of these applies:
 
 - the **unpacked SDK directory** you were given (the one containing `pom.xml` and `src/main/java/`); or
 - the sources jar in your local Maven repository under
-  `~/.m2/repository/<groupId as directories>/paypal-server-sdk/2.29.0/`.
+  `~/.m2/repository/<groupId as directories>/paypal-server-sdk/2.4.0/`.
 
 Treat it as a read-only reference and grep it locally.
 
@@ -178,3 +178,17 @@ yours to look up.
 | `{CONSTANT}`, `{placeholder}` | a stand-in value in an example | nothing to look up — substitute your own |
 
 Any other `{...}` you meet is a local example; the sentence around it says what belongs there.
+
+## Integration workflow — load the companion skill at each step
+
+**Load the skill named for a step before you write that step's code, even where you have already read
+the source.** The generated source is authoritative for the SDK's *surface*; these skills carry the
+usage rules a signature cannot show, and each one names the trap that surface hides.
+
+1. **java-client-initialization** — before you construct the client.
+2. **java-authentication** — before you set credentials, and when a call returns 401 or 403.
+3. **java-calling-endpoints** — before the first operation call.
+4. **java-models** — as soon as a request or response field is not a plain string or number.
+5. **java-error-handling** — before your first `try`/`catch` around a call.
+6. **java-configuration-resilience** — before you touch retries, timeouts, transport or the environment.
+7. **java-testing** — before you stub the SDK.

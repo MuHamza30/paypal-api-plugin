@@ -24,7 +24,7 @@ export const {enumType}Schema: Schema<{EnumType}> = stringEnum({EnumType});
 Usage:
 
 ```typescript
-import { {EnumType} } from 'paypal-server-sdklib';
+import { {EnumType} } from '@paypal/paypal-server-sdk';
 
 const v: {EnumType} = {EnumType}.FirstValue;    // reference the member
 const raw: string = {EnumType}.FirstValue;      // string assignment works directly

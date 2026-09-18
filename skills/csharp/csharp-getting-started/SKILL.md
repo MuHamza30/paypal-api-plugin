@@ -24,8 +24,8 @@ retries, testing), see the companion API-agnostic skills: `csharp-client-initial
 | --- | --- |
 | API | `PayPal Server SDK` |
 | Runtime dependencies | `APIMatic.Core`, `Microsoft.CSharp`, `Microsoft.Extensions.Configuration.Binder`; a build adds more — **read the `PackageReference` rows in the `.csproj`**. Newtonsoft.Json arrives **transitively** |
-| Package id | `PaypalServerSdkStandard` (version `2.29.0.0`) — the `<AssemblyName>`, and the only string `dotnet add package` accepts |
-| Install | `dotnet add reference path/to/PaypalServerSdk.Standard/PaypalServerSdk.Standard.csproj` |
+| Package id | `PayPalServerSDK` (version `2.4.0`) — the `<AssemblyName>`, and the only string `dotnet add package` accepts |
+| Install | `dotnet add package PayPalServerSDK` |
 | Root namespace | `PaypalServerSdk.Standard` — **also the project name, folder and `.csproj` file name**, and what every `using` references |
 | Target framework | `netstandard2.0` |
 | Client | one `public sealed class PaypalServerSdkClient`, built with `new PaypalServerSdkClient.Builder()…Build()` — the constructor is **private** |
@@ -142,10 +142,10 @@ the concrete identifier from the source.
 This SDK is published out of `https://github.com/paypal/PayPal-Dotnet-Server-SDK`, branch `main` — take that branch explicitly rather than the repository default, which is not necessarily where this SDK is released from. Which registry that pipeline pushes to is a property of the pipeline rather than of the SDK. Try the install command below as-is first: if it resolves, the package is on the public registry and there is nothing further to configure. Only if it 404s do you need the feed — take it from the repository's publish workflow, or from whoever owns the pipeline, and configure that registry before retrying.
 
 ```bash
-dotnet add reference path/to/PaypalServerSdk.Standard/PaypalServerSdk.Standard.csproj
+dotnet add package PayPalServerSDK
 ```
 
-If the SDK was published, that is a `dotnet add package` line resolving `PaypalServerSdkStandard` from your feeds.
+If the SDK was published, that is a `dotnet add package` line resolving `PayPalServerSDK` from your feeds.
 If it was not, the SDK is a **source project, not a registry package** — reference the class library's
 `.csproj` instead, from under `vendor/` in the consuming project, committed but never edited:
 
@@ -177,7 +177,7 @@ surface without saying so.
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="PaypalServerSdkStandard" Version="2.29.0.0" />
+  <PackageReference Include="PayPalServerSDK" Version="2.4.0" />
 </ItemGroup>
 ```
 
@@ -187,10 +187,10 @@ Confirm what restored rather than assuming:
 dotnet list package
 ```
 
-### `PaypalServerSdkStandard` and `PaypalServerSdk.Standard` are not interchangeable
+### `PayPalServerSDK` and `PaypalServerSdk.Standard` are not interchangeable
 
-`PaypalServerSdkStandard` belongs in `dotnet add package` and `<PackageReference Include="…">` and **nowhere
-else**. `using PaypalServerSdkStandard;` does not compile.
+`PayPalServerSDK` belongs in `dotnet add package` and `<PackageReference Include="…">` and **nowhere
+else**. `using PayPalServerSDK;` does not compile.
 
 ## SDK source — read it in place
 
@@ -203,7 +203,7 @@ Clone it and read the clone — it is the source this pack documents:
 git clone --filter=blob:none --branch main https://github.com/paypal/PayPal-Dotnet-Server-SDK
 ```
 
-**The clone is a branch; your install is pinned.** Check out the tag matching the version you installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
+**The clone is a branch; your install is pinned.** Check out the tag matching `2.4.0`, the version installed above before you read anything from it — a branch keeps moving after a release is cut, so the default checkout can be a different SDK than the one you compile against, and nothing in the tree will tell you. `git ls-remote --tags` lists what the repository offers; if no tag matches, treat every signature you read as unconfirmed rather than assuming it carried over. Clone it outside your project directory and treat it as read-only. It is a reference, not a dependency: what you build against is the package installed above, never this checkout.
 
 An existing copy, if you already have one, is the **unpacked SDK directory** you were given (the one
 containing the `.sln`, `README.md`, `doc/` and the `PaypalServerSdk.Standard/` project folder), or the copy
@@ -214,7 +214,7 @@ inside your repository if it was wired in with a `<ProjectReference>`.
 > layout below describes the SDK's *source tree*, which is a different artifact from the restored
 > package; the paragraph above this one says where that tree comes from for this SDK.
 >
-> Until you have it, the only reference that ships with the package is `PaypalServerSdkStandard.xml`, beside the
+> Until you have it, the only reference that ships with the package is `PayPalServerSDK.xml`, beside the
 > assembly in the package folder. That is the IntelliSense file: greppable for member names and summary
 > text, carrying no usage examples — so it answers "does this member exist, and what is it called" and
 > nothing else.
@@ -271,3 +271,17 @@ is yours to look up.
 | `{ConfigVar}`, `{SERVER}`, `{Default}`, `{Strategy}`, `{xSomeHeader}`, `{discriminatorField}`, `{ChildA}`, `{ChildB}`, `{childAValue}`, `{childBValue}`, `{params}`, `{placeholder}` | a stand-in value or a locally-explained name in an example | the sentence around it, or substitute your own |
 
 Any other `{...}` you meet is a local example; the sentence around it says what belongs there.
+
+## Integration workflow — load the companion skill at each step
+
+**Load the skill named for a step before you write that step's code, even where you have already read
+the source.** The generated source is authoritative for the SDK's *surface*; these skills carry the
+usage rules a signature cannot show, and each one names the trap that surface hides.
+
+1. **csharp-client-initialization** — before you construct the client.
+2. **csharp-authentication** — before you set credentials, and when a call returns 401 or 403.
+3. **csharp-calling-endpoints** — before the first operation call.
+4. **csharp-models** — as soon as a request or response field is not a plain string or number.
+5. **csharp-error-handling** — before your first `try`/`catch` around a call.
+6. **csharp-configuration-resilience** — before you touch retries, timeouts, transport or the environment.
+7. **csharp-testing** — before you stub the SDK.

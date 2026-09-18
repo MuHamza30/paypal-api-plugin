@@ -29,7 +29,7 @@ auth adapters. See [reference.md](reference.md).
 ## Basic auth
 
 ```typescript
-import { Client } from 'paypal-server-sdklib';
+import { Client } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   {basicAuthProperty}: {
@@ -72,7 +72,7 @@ key(s) (`TS2741` when exactly one is missing, `TS2739` when several are).
 Every OAuth credential field is **`oAuth`-prefixed** — capital A:
 
 ```typescript
-import { Client } from 'paypal-server-sdklib';
+import { Client } from '@paypal/paypal-server-sdk';
 
 const client = new Client({
   {oAuthProperty}: {

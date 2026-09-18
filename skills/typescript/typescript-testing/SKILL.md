@@ -20,7 +20,7 @@ uses.
 ## A reusable stub helper
 
 ```typescript
-import { Client } from 'paypal-server-sdklib';
+import { Client } from '@paypal/paypal-server-sdk';
 
 function clientReturning(status: number, body: unknown): {
   client: Client;
@@ -162,7 +162,7 @@ operation — to get the class for the status code you are stubbing.
 ```typescript
 // Typed error classes are re-exported from the package root; `.` and `./metadata`
 // are the only exported subpaths, so there is no `/errors` import path.
-import { {ErrorResponse}Error } from 'paypal-server-sdklib';
+import { {ErrorResponse}Error } from '@paypal/paypal-server-sdk';
 
 test('throws typed error on API error', async () => {
   const { client } = clientReturning(422, { errors: ['bad input'] });
@@ -177,7 +177,7 @@ test('throws typed error on API error', async () => {
 **Case B — base `ApiError`:**
 
 ```typescript
-import { ApiError } from 'paypal-server-sdklib';
+import { ApiError } from '@paypal/paypal-server-sdk';
 
 test('throws ApiError on non-2xx', async () => {
   const { client } = clientReturning(422, { errors: ['bad input'] });
